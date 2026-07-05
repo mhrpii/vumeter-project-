@@ -1118,7 +1118,7 @@ LCD Ses Gorsellestirme + Sistem Monitoru (Linux)
   W     -> Parlaklik (100/75/50/25)
   Q     -> Cikis
 
-Ilk mod: Spektrum. FPS: {args.fps}
+Ilk mod: Spektrum. FPS: 24 (bar) / 12 (panel) / 5 (sysmon)
 """)
 
     # Baslamadan once zombi trcc sureclerini temizle (USB kilidini onle)
@@ -1146,7 +1146,7 @@ Ilk mod: Spektrum. FPS: {args.fps}
     def _fps_for(m):
         if m == "Sistem Monitoru": return 5
         if m == "Olcum Paneli": return 12
-        return 30
+        return 24
 
     def render_loop():
         frames = 0; t0 = time.time()
@@ -1199,8 +1199,20 @@ Ilk mod: Spektrum. FPS: {args.fps}
                     fpath = "/tmp/lcd_frame_m.png"
                 else:
                     fpath = f"/tmp/lcd_frame_{frames % 3}.png"
+                _t_save = time.time()
                 pygame.image.save(surf, fpath)
+                _t_send = time.time()
                 sender.send(fpath)
+                _t_done = time.time()
+                # Takilma dedektoru: kare 0.5 sn'yi asarsa suclu kismi logla
+                if _t_done - t > 0.5:
+                    try:
+                        with open("/tmp/lcd_stall.log", "a") as _lf:
+                            _lf.write(f"{time.strftime('%H:%M:%S')} TOPLAM={_t_done-t:.2f}s "
+                                      f"cizim={_t_save-t:.2f}s png={_t_send-_t_save:.2f}s "
+                                      f"usb={_t_done-_t_send:.2f}s mod={mode}\n")
+                    except Exception:
+                        pass
                 frames += 1
                 if args.debug and frames % 100 == 0:
                     fps_now = frames / (time.time() - t0)
