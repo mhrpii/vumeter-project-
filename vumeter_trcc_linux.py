@@ -148,10 +148,30 @@ class TRCCSender:
 
 
 # ==================== CAVA ====================
+CAVA_SOURCE = "alsa_output.usb-Focusrite_Scarlett_Solo_4th_Gen_S1TTKRP5739DF7-00.HiFi__Line1__sink.monitor"
+
+def _wait_for_source(timeout=90):
+    """Acilis yarisina karsi: Scarlett PipeWire kaynagi gorunene kadar bekle.
+    Kaynak gelirse True, sure dolarsa False (yine de denenir)."""
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        try:
+            out = subprocess.run(["pactl", "list", "short", "sources"],
+                                 capture_output=True, text=True, timeout=3).stdout
+            if CAVA_SOURCE in out:
+                return True
+        except Exception:
+            pass
+        if not _state.get("running", True):
+            return False
+        time.sleep(2)
+    return False
+
+
 def write_cava_config(bars=NUM_BARS, fps=60):
     """PipeWire monitor kaynagi ile cava config yaz."""
     os.makedirs(os.path.dirname(CAVA_CONFIG), exist_ok=True)
-    src = "alsa_output.usb-Focusrite_Scarlett_Solo_4th_Gen_S1TTKRP5739DF7-00.HiFi__Line1__sink.monitor"
+    src = CAVA_SOURCE
     with open(CAVA_CONFIG, "w") as f:
         f.write(f"""[general]
 bars = {bars}
@@ -174,20 +194,37 @@ bit_format = 8bit
 class CavaReader:
     """cava'yi alt surec baslat, satir satir 14 sayilik dizi oku."""
     def __init__(self):
+        self.bars = [0] * NUM_BARS
+        self._lock = threading.Lock()
+        self.proc = None
+        self._t = threading.Thread(target=self._read_loop, daemon=True)
+        self._t.start()
+
+    def _start_cava(self):
+        """Kaynak hazir olana kadar bekle, sonra cava'yi baslat."""
+        _wait_for_source()
         write_cava_config()
         self.proc = subprocess.Popen(
             ["cava"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1,
         )
-        self.bars = [0] * NUM_BARS
-        self._lock = threading.Lock()
-        self._t = threading.Thread(target=self._read_loop, daemon=True)
-        self._t.start()
 
     def _read_loop(self):
         while _state["running"]:
+            # cava calismiyorsa (ilk acilis / oldu / kaynak gitti) baslat
+            if self.proc is None or self.proc.poll() is not None:
+                with self._lock:
+                    self.bars = [0] * NUM_BARS   # bekleme sirasinda bos ekran/idle
+                try:
+                    self._start_cava()
+                except Exception:
+                    time.sleep(3)
+                    continue
             try:
                 line = self.proc.stdout.readline()
-                if not line: break
+                if not line:
+                    # cava kapandi (or. Scarlett USB'den cekildi) -> dongu basinda yeniden baslar
+                    time.sleep(2)
+                    continue
                 parts = line.strip().rstrip(";").split(";")
                 if len(parts) >= NUM_BARS:
                     vals = [int(p) for p in parts[:NUM_BARS]]
