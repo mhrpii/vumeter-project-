@@ -1118,7 +1118,7 @@ LCD Ses Gorsellestirme + Sistem Monitoru (Linux)
   W     -> Parlaklik (100/75/50/25)
   Q     -> Cikis
 
-Ilk mod: Spektrum. FPS: 24 (bar) / 12 (panel) / 5 (sysmon)
+Ilk mod: Spektrum. FPS: 12 (bar) / 10 (panel) / 5 (sysmon)
 """)
 
     # Baslamadan once zombi trcc sureclerini temizle (USB kilidini onle)
@@ -1144,9 +1144,11 @@ Ilk mod: Spektrum. FPS: 24 (bar) / 12 (panel) / 5 (sysmon)
         _state["running"] = False
     _signal.signal(_signal.SIGTERM, _clean_exit)
     def _fps_for(m):
+        # NOT: panel 24+ FPS'te uzun surede kilitlenebiliyor (Tem 2026 tespiti).
+        # 12 FPS haftalarca kanitlanmis kararli deger.
         if m == "Sistem Monitoru": return 5
-        if m == "Olcum Paneli": return 12
-        return 24
+        if m == "Olcum Paneli": return 10
+        return 12
 
     def render_loop():
         frames = 0; t0 = time.time()
@@ -1170,7 +1172,7 @@ Ilk mod: Spektrum. FPS: 24 (bar) / 12 (panel) / 5 (sysmon)
                         last_sound = t
                     if t - last_sound > IDLE_THRESHOLD:
                         draw_idle_screen(surf, t - t0)
-                        fpath = "/tmp/lcd_frame_idle.png"
+                        fpath = f"/tmp/lcd_frame_idle{int(t*2) % 3}.png"
                         pygame.image.save(surf, fpath)
                         sender.send(fpath)
                         slp = dt - (time.time() - t)
@@ -1194,9 +1196,9 @@ Ilk mod: Spektrum. FPS: 24 (bar) / 12 (panel) / 5 (sysmon)
                     sender.set_brightness(_state["brightness"])
                     _state["brightness_changed"] = False
                 if mode == "Sistem Monitoru":
-                    fpath = "/tmp/lcd_frame_s.png"
+                    fpath = f"/tmp/lcd_frame_s{frames % 3}.png"
                 elif mode == "Olcum Paneli":
-                    fpath = "/tmp/lcd_frame_m.png"
+                    fpath = f"/tmp/lcd_frame_m{frames % 3}.png"
                 else:
                     fpath = f"/tmp/lcd_frame_{frames % 3}.png"
                 _t_save = time.time()
