@@ -72,9 +72,11 @@ _state = {
     "theme_idx": 0,
     "led_theme_idx": 0,
     "vu_dial_idx": 0,
+    "ch_layout": 1,   # GOZLE SECILDI (6 Tem): 1 = L+R' -> iki yarida bas sagda. C tusu ile degisir.
     "brightness": 100,
     "brightness_changed": False,
     "vu_dial_idx": 0,
+    "ch_layout": 1,   # GOZLE SECILDI (6 Tem): 1 = L+R' -> iki yarida bas sagda. C tusu ile degisir.
     "meter_page": 0,
     "brightness": 100,
     "brightness_changed": False,
@@ -1059,6 +1061,10 @@ def keyboard_loop():
                 _state["mode"] = "Sistem Monitoru"; print("\rMod: Sistem Monitoru       ")
             elif ch == "6":
                 _state["mode"] = "Olcum Paneli"; print("\rMod: Olcum Paneli          ")
+            elif ch in ("c", "C"):
+                _state["ch_layout"] = (_state["ch_layout"] + 1) % 4
+                _names = ("0: L+R", "1: L+R'", "2: L'+R", "3: L'+R'")
+                print(f"\rKanal dizilimi -> {_names[_state['ch_layout']]}          ")
             elif ch == "\t":
                 # Moda gore ilgili tema listesinde ilerle
                 if _state["mode"] == "Spektrum":
@@ -1164,7 +1170,12 @@ Ilk mod: Spektrum. FPS: 12 (bar) / 10 (panel) / 5 (sysmon)
                 # sol_yari + sag_yari[::-1] -> iki yarida da bas ayni ucta.
                 # VU ve Olcum Paneli HAM veri kullanir (frekans hesaplari icin gerekli).
                 if len(snap) >= _HALF_N * 2:
-                    snap_bars = snap[:_HALF_N] + snap[_HALF_N:_HALF_N*2][::-1]
+                    _L = snap[:_HALF_N]; _R = snap[_HALF_N:_HALF_N*2]
+                    _lay = _state.get("ch_layout", 0)
+                    if _lay == 0:   snap_bars = _L + _R
+                    elif _lay == 1: snap_bars = _L + _R[::-1]
+                    elif _lay == 2: snap_bars = _L[::-1] + _R
+                    else:           snap_bars = _L[::-1] + _R[::-1]
                 else:
                     snap_bars = snap
                 if mode not in ("Sistem Monitoru", "Olcum Paneli"):
