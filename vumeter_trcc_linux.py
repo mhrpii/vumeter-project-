@@ -228,16 +228,21 @@ class CavaReader:
         self.bars = [0] * NUM_BARS
         self._lock = threading.Lock()
         self.proc = None
+        self._active_source = None
+        self._zero_since = None
         self._t = threading.Thread(target=self._read_loop, daemon=True)
         self._t.start()
 
     def _start_cava(self):
-        """Kaynak hazir olana kadar bekle, sonra cava'yi baslat."""
+        """Kaynak hazir olana kadar bekle, sonra cava'yi baslat.
+        Baglandigi kaynagi kaydet ki profil degisince fark edelim."""
         _wait_for_source()
+        self._active_source = _find_scarlett_monitor()   # o anki kaynagi hatirla
         write_cava_config()
         self.proc = subprocess.Popen(
             ["cava"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1,
         )
+        self._zero_since = None
 
     def _read_loop(self):
         while _state["running"]:
@@ -261,6 +266,25 @@ class CavaReader:
                     vals = [int(p) for p in parts[:NUM_BARS]]
                     with self._lock:
                         self.bars = vals
+                    # PROFIL DEGISIMI TESPITI: uzun sure sifir geliyorsa ve
+                    # aktif Scarlett monitoru degismisse -> cava'yi yeni kaynakla yenile
+                    if max(vals) <= 1:
+                        if self._zero_since is None:
+                            self._zero_since = time.time()
+                        elif time.time() - self._zero_since > 1.5:
+                            cur = _find_scarlett_monitor()
+                            if cur != self._active_source:
+                                # kaynak degismis (profil degisimi) -> cava'yi yeniden baslat
+                                try:
+                                    self.proc.terminate()
+                                except Exception:
+                                    pass
+                                self.proc = None
+                                self._zero_since = None
+                                continue
+                            self._zero_since = None  # kaynak ayni, sadece sessizlik
+                    else:
+                        self._zero_since = None
             except Exception:
                 continue
 
