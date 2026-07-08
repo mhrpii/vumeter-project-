@@ -19,11 +19,7 @@ import pygame
 import sysmon  # native Linux sensorleri
 
 # ==================== SABITLER ====================
-# SUPERSAMPLING: 1.5x cozunurlukte ciz, panele gonderirken 462x1920'ye kucult.
-# Netlik belirgin artar; olculdu: kare butcesinin ~%20'si (12 FPS'te bol yer var).
-SS = 1.5
-PANEL_W, PANEL_H = 462, 1920
-WIDTH, HEIGHT = int(PANEL_W * SS), int(PANEL_H * SS)
+WIDTH, HEIGHT = 462, 1920          # PORTRE cizim: LCD duz gosterir (dondurme yok, net)
 FRAME_PATH = "/tmp/lcd_frame.png"
 __version__ = "1.3.0"
 DEVICE_KEY = "0416:5408"
@@ -1241,8 +1237,7 @@ Ilk mod: Spektrum. FPS: 12 (bar) / 10 (panel) / 5 (sysmon)
                     if t - last_sound > IDLE_THRESHOLD:
                         draw_idle_screen(surf, t - t0)
                         fpath = f"/tmp/lcd_frame_idle{int(t*2) % 3}.png"
-                        _small = pygame.transform.smoothscale(surf, (PANEL_W, PANEL_H))
-                        pygame.image.save(_small, fpath)
+                        pygame.image.save(surf, fpath)
                         sender.send(fpath)
                         slp = dt - (time.time() - t)
                         if slp > 0: time.sleep(slp)
@@ -1271,8 +1266,7 @@ Ilk mod: Spektrum. FPS: 12 (bar) / 10 (panel) / 5 (sysmon)
                 else:
                     fpath = f"/tmp/lcd_frame_{frames % 3}.png"
                 _t_save = time.time()
-                _small = pygame.transform.smoothscale(surf, (PANEL_W, PANEL_H))
-                pygame.image.save(_small, fpath)
+                pygame.image.save(surf, fpath)
                 _t_send = time.time()
                 sender.send(fpath)
                 _t_done = time.time()
