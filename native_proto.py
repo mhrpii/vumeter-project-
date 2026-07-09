@@ -905,6 +905,40 @@ def build_tray():
     def do_quit(): _state["running"] = False
     qa.triggered.connect(do_quit); menu.addAction(qa)
 
+    # KONTROL PENCERESI - tray'e tiklaninca acilir
+    ctrl_win = [None]
+    def _brightness_cb(v):
+        _state["brightness"] = v; _state["brightness_changed"] = True
+    def _led_clear():
+        _led_texture_cache["surf"] = None
+    def _vu_clear():
+        _vu_scaled_cache.clear()
+    def open_control():
+        try:
+            import control_window
+            if ctrl_win[0] is None:
+                ctrl_win[0] = control_window.build_control_window(
+                    _state, COLOR_THEME_NAMES, LED_THEME_NAMES, len(VU_DIALS),
+                    _brightness_cb, _led_clear, _vu_clear)
+            w = ctrl_win[0]
+            if hasattr(w, "_refresh"): w._refresh()
+            w.show(); w.raise_(); w.activateWindow()
+        except Exception as e:
+            print(f"Kontrol penceresi hatasi: {e}")
+    def on_tray_activated(reason):
+        # Trigger (sol tik) veya DoubleClick -> pencere ac
+        from PyQt5.QtWidgets import QSystemTrayIcon as _QSTI
+        if reason in (_QSTI.Trigger, _QSTI.DoubleClick):
+            open_control()
+    tray.activated.connect(on_tray_activated)
+
+    # Menuye de "Kontrol Paneli" ekle (en uste)
+    ctrl_action = menu.actions()[0] if menu.actions() else None
+    open_act = QAction("Kontrol Paneli Ac", menu)
+    open_act.triggered.connect(open_control)
+    menu.insertAction(ctrl_action, open_act)
+    menu.insertSeparator(ctrl_action)
+
     tray.setContextMenu(menu); tray.show()
     return app
 
