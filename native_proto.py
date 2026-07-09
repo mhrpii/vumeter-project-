@@ -40,7 +40,8 @@ COLOR_THEME_NAMES = list(COLOR_THEMES.keys())
 _HALF_N = NUM_BARS // 2
 
 _state = {"theme_idx": 0, "running": True, "ch_layout": 1,
-          "mode": "Spektrum", "led_theme_idx": 0, "vu_dial_idx": 0, "meter_page": 0}
+          "mode": "Spektrum", "led_theme_idx": 0, "vu_dial_idx": 0, "meter_page": 0,
+          "brightness": 100, "brightness_changed": False}
 
 LED_THEMES = {
     "Camgobegi": [(10, 90, 70), (40, 200, 190), (120, 255, 235)],
@@ -717,6 +718,96 @@ def api_setup():
         return False
 
 
+# ==================== TRAY MENU (PyQt5) ====================
+_tray_ref = None; _menu_ref = None
+
+
+def build_tray():
+    """Sistem tepsisi ikonu + menu. pygame ile ayni process, processEvents ile."""
+    os.environ["QT_QPA_PLATFORM"] = "xcb"
+    from PyQt5.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QAction, QActionGroup
+    from PyQt5.QtGui import QIcon, QPixmap, QPainter, QColor
+
+    app = QApplication.instance() or QApplication(sys.argv)
+    app.setQuitOnLastWindowClosed(False)
+
+    def make_icon():
+        pm = QPixmap(64, 64); pm.fill(QColor(20, 22, 26))
+        p = QPainter(pm)
+        p.setBrush(QColor(60, 220, 120)); p.setPen(QColor(60, 220, 120))
+        x = 6
+        for h in [20, 38, 28, 48, 34, 44, 24]:
+            p.drawRect(x, 58 - h, 7, h); x += 9
+        p.end()
+        return QIcon(pm)
+
+    global _tray_ref, _menu_ref
+    tray = QSystemTrayIcon(make_icon()); tray.setToolTip("Vumeter LCD (Native+API)")
+    menu = QMenu(); _tray_ref = tray; _menu_ref = menu
+
+    # Spektrum -> renk temalari
+    spek = menu.addMenu("Spektrum")
+    def mk_spek(idx):
+        def _f(): _state["mode"] = "Spektrum"; _state["theme_idx"] = idx
+        return _f
+    for i, tn in enumerate(COLOR_THEME_NAMES):
+        a = QAction(tn, menu); a.triggered.connect(mk_spek(i)); spek.addAction(a)
+
+    # LED Spektrum -> LED temalari
+    leds = menu.addMenu("LED Spektrum")
+    def mk_led(idx):
+        def _f():
+            _state["mode"] = "LED Spektrum"; _state["led_theme_idx"] = idx
+            _led_texture_cache["surf"] = None
+        return _f
+    for i, tn in enumerate(LED_THEME_NAMES):
+        a = QAction(tn, menu); a.triggered.connect(mk_led(i)); leds.addAction(a)
+
+    # VU Metre -> kadranlar
+    vum = menu.addMenu("VU Metre")
+    def mk_vu(idx):
+        def _f():
+            _state["mode"] = "VU Metre"; _state["vu_dial_idx"] = idx
+            _vu_scaled_cache.clear()
+        return _f
+    for i in range(len(VU_DIALS)):
+        a = QAction(f"Kadran {i+1}", menu); a.triggered.connect(mk_vu(i)); vum.addAction(a)
+
+    # Olcum Paneli -> sayfalar
+    olcp = menu.addMenu("Olcum Paneli")
+    pg_group = QActionGroup(menu); pg_group.setExclusive(True)
+    def mk_page(idx):
+        def _f(): _state["mode"] = "Olcum Paneli"; _state["meter_page"] = idx
+        return _f
+    for i, pn in enumerate(("Seviyeler", "Analiz")):
+        a = QAction(pn, menu, checkable=True); a.setChecked(_state.get("meter_page",0)==i)
+        a.triggered.connect(mk_page(i)); pg_group.addAction(a); olcp.addAction(a)
+
+    # Sistem Monitoru
+    smon = QAction("Sistem Monitoru", menu)
+    smon.triggered.connect(lambda: _state.__setitem__("mode", "Sistem Monitoru"))
+    menu.addAction(smon)
+    menu.addSeparator()
+
+    # Parlaklik (API'ye baglanir)
+    br_menu = menu.addMenu("Parlaklik")
+    br_group = QActionGroup(menu); br_group.setExclusive(True)
+    def mk_br(p):
+        def _f(): _state["brightness"] = p; _state["brightness_changed"] = True
+        return _f
+    for p in (100, 75, 50, 25):
+        a = QAction(f"%{p}", menu, checkable=True); a.setChecked(_state["brightness"]==p)
+        a.triggered.connect(mk_br(p)); br_group.addAction(a); br_menu.addAction(a)
+
+    menu.addSeparator()
+    qa = QAction("Cikis", menu)
+    def do_quit(): _state["running"] = False
+    qa.triggered.connect(do_quit); menu.addAction(qa)
+
+    tray.setContextMenu(menu); tray.show()
+    return app
+
+
 # ==================== ANA DONGU ====================
 def main():
     # argv'den mod sec (test icin): python3 native_proto.py "LED Spektrum"
@@ -731,6 +822,15 @@ def main():
         return
 
     cava = CavaReader()
+
+    # tray menu (opsiyonel - PyQt5 yoksa argv modu)
+    qt_app = None
+    if not (len(sys.argv) > 1 and sys.argv[1] == "--no-tray"):
+        try:
+            qt_app = build_tray()
+            print("Tray menu aktif.")
+        except Exception as e:
+            print(f"Tray baslatilamadi ({e}), argv modu.")
 
     # shared memory + sender process
     shm = shared_memory.SharedMemory(create=True, size=WIDTH*HEIGHT*3)
@@ -763,6 +863,19 @@ def main():
             shm.buf[:len(raw)] = raw
             frame_counter.value = frames
             frames += 1
+
+            # tray olaylarini isle
+            if qt_app is not None:
+                qt_app.processEvents()
+            # parlaklik degistiyse API'ye gonder
+            if _state.get("brightness_changed"):
+                _state["brightness_changed"] = False
+                try:
+                    import requests as _rq
+                    _rq.post(f"{API_BASE}/devices/{DEVICE_KEY}/display/brightness",
+                             json={"percent": _state["brightness"]}, timeout=2)
+                except Exception:
+                    pass
 
             # FPS sinirla
             dt = 1.0 / FPS
