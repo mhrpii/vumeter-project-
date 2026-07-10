@@ -593,6 +593,27 @@ def wait_until_ready(source_timeout=90, settle_timeout=25):
     print("Oturma beklemesi zaman asimi (yine de baslaniyor).")
 
 
+def wait_for_cava_data(cava, timeout=12):
+    """B+: cava GERCEKTEN anlamli veri uretene kadar bekle (max timeout sn).
+    Kaynak RUNNING olsa bile cava ilk saniyelerde bos olabilir -> atlama.
+    Birkac ardisik anlamli kare gorunce hazir say."""
+    t0 = time.time()
+    good = 0
+    while time.time() - t0 < timeout:
+        if not _state.get("running", True):
+            return
+        snap = cava.snapshot()
+        if snap and max(snap) > 3:
+            good += 1
+            if good >= 3:      # 3 ardisik anlamli kare = akis stabil
+                print("cava verisi stabil, render baslıyor.")
+                return
+        else:
+            good = 0
+        time.sleep(0.2)
+    print("cava veri beklemesi zaman asimi (yine de baslaniyor).")
+
+
 def write_cava_config(bars=NUM_BARS, fps=60):
     os.makedirs(os.path.dirname(CAVA_CONFIG), exist_ok=True)
     src = _find_scarlett_monitor()
@@ -878,6 +899,18 @@ def build_tray():
         p.end()
         return QIcon(pm)
 
+    def theme_icon(stops):
+        """Tema paletinden 3 renkli yatay serit ikonu uret."""
+        pm2 = QPixmap(48, 48); pm2.fill(QColor(0, 0, 0, 0))
+        pp = QPainter(pm2)
+        n = len(stops)
+        seg = 48 // n
+        for i, c in enumerate(stops):
+            pp.setBrush(QColor(c[0], c[1], c[2])); pp.setPen(QColor(c[0], c[1], c[2]))
+            pp.drawRect(i * seg, 8, seg, 32)
+        pp.end()
+        return QIcon(pm2)
+
     global _tray_ref, _menu_ref
     tray = QSystemTrayIcon(make_icon()); tray.setToolTip("Vumeter LCD (Native+API)")
     menu = QMenu(); _tray_ref = tray; _menu_ref = menu
@@ -888,7 +921,8 @@ def build_tray():
         def _f(): _state["mode"] = "Spektrum"; _state["theme_idx"] = idx
         return _f
     for i, tn in enumerate(COLOR_THEME_NAMES):
-        a = QAction(tn, menu); a.triggered.connect(mk_spek(i)); spek.addAction(a)
+        a = QAction(theme_icon(COLOR_THEMES[tn]), tn, menu)
+        a.triggered.connect(mk_spek(i)); spek.addAction(a)
 
     # LED Spektrum -> LED temalari
     leds = menu.addMenu("LED Spektrum")
@@ -898,7 +932,8 @@ def build_tray():
             _led_texture_cache["surf"] = None
         return _f
     for i, tn in enumerate(LED_THEME_NAMES):
-        a = QAction(tn, menu); a.triggered.connect(mk_led(i)); leds.addAction(a)
+        a = QAction(theme_icon(LED_THEMES[tn]), tn, menu)
+        a.triggered.connect(mk_led(i)); leds.addAction(a)
 
     # VU Metre -> kadranlar
     vum = menu.addMenu("VU Metre")
@@ -1002,14 +1037,25 @@ def main():
 
     cava = CavaReader()
 
-    # tray menu (opsiyonel - PyQt5 yoksa argv modu)
+    # B+: autostart'ta cava GERCEKTEN veri uretene kadar bekle (atlama onleme)
+    if autostart:
+        wait_for_cava_data(cava, timeout=12)
+
+    # tray menu - C: RETRY'li (acilista xcb/masaustu gec hazir olabilir -> menusuz acilma)
     qt_app = None
     if not (len(sys.argv) > 1 and sys.argv[1] == "--no-tray"):
-        try:
-            qt_app = build_tray()
-            print("Tray menu aktif.")
-        except Exception as e:
-            print(f"Tray baslatilamadi ({e}), argv modu.")
+        tray_attempts = 5 if autostart else 1
+        for attempt in range(tray_attempts):
+            try:
+                qt_app = build_tray()
+                print(f"Tray menu aktif (deneme {attempt+1}).")
+                break
+            except Exception as e:
+                if attempt < tray_attempts - 1:
+                    print(f"Tray deneme {attempt+1} basarisiz ({e}), 3sn sonra tekrar...")
+                    time.sleep(3)
+                else:
+                    print(f"Tray baslatilamadi ({e}), argv modu (menusuz).")
 
     # shared memory + sender process
     shm = shared_memory.SharedMemory(create=True, size=WIDTH*HEIGHT*3)
