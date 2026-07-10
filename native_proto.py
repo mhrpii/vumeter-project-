@@ -557,6 +557,42 @@ def _wait_for_source(timeout=90):
     return False
 
 
+def _system_load_ok(threshold=1.5):
+    """1 dakikalik yuk / cekirdek sayisi < threshold ise sistem oturmus demektir."""
+    try:
+        load1 = os.getloadavg()[0]
+        ncpu = os.cpu_count() or 1
+        return (load1 / ncpu) < threshold
+    except Exception:
+        return True
+
+
+def wait_until_ready(source_timeout=90, settle_timeout=25):
+    """B: Acilis yarisina karsi - render baslamadan once sistemin OTURMASINI bekle.
+    (1) Scarlett monitor RUNNING olana kadar, (2) sistem yuku dususe kadar bekle."""
+    # (1) kaynak hazir mi
+    _wait_for_source(source_timeout)
+    # (2) kaynak RUNNING + yuk dusuk olana kadar bekle (max settle_timeout)
+    t0 = time.time()
+    while time.time() - t0 < settle_timeout:
+        if not _state.get("running", True):
+            return
+        running = False
+        try:
+            out = subprocess.run(["pactl", "list", "short", "sources"],
+                                 capture_output=True, text=True, timeout=3).stdout
+            for line in out.splitlines():
+                if "Scarlett" in line and ".monitor" in line and "RUNNING" in line:
+                    running = True; break
+        except Exception:
+            pass
+        if running and _system_load_ok():
+            print("Sistem oturdu (kaynak RUNNING + yuk dusuk).")
+            return
+        time.sleep(1.5)
+    print("Oturma beklemesi zaman asimi (yine de baslaniyor).")
+
+
 def write_cava_config(bars=NUM_BARS, fps=60):
     os.makedirs(os.path.dirname(CAVA_CONFIG), exist_ok=True)
     src = _find_scarlett_monitor()
@@ -945,12 +981,20 @@ def build_tray():
 
 # ==================== ANA DONGU ====================
 def main():
-    # argv'den mod sec (test icin): python3 native_proto.py "LED Spektrum"
-    if len(sys.argv) > 1:
-        _state["mode"] = sys.argv[1]
+    # argv: mod adi ve/veya --autostart / --no-tray bayraklari
+    args = sys.argv[1:]
+    autostart = "--autostart" in args
+    args = [a for a in args if not a.startswith("--")]
+    if args:
+        _state["mode"] = args[0]
     pygame.init()
     surf = pygame.Surface((WIDTH, HEIGHT))
-    print(f"MOD: {_state['mode']}")
+    print(f"MOD: {_state['mode']}" + (" (autostart)" if autostart else ""))
+
+    # A+B: autostart'ta sistemin oturmasini bekle (acilis yarisi atlamasini onler)
+    if autostart:
+        print("Autostart: sistemin oturmasi bekleniyor...")
+        wait_until_ready()
 
     if not api_setup():
         print("API kurulamadi, cikiliyor.")
