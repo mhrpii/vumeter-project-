@@ -337,27 +337,61 @@ def draw_sysmon(surf, fps):
     margin = 16
     vfont = _sm_font(30); ufont = _sm_font(15); lfont = _sm_font(17)
 
+    def draw_grad_bar(x, y, w, h, frac):
+        """Yatay gradient bar: yesil->sari->kirmizi, sadece dolu kismi.
+        frac'a gore anlik uzar/kisalir (canli)."""
+        frac = max(0.0, min(1.0, frac))
+        # arka yuva
+        pygame.draw.rect(surf, (34, 43, 54), (x, y, w, h), border_radius=h//2)
+        fw = int(w * frac)
+        if fw < 2:
+            return
+        # gradient: her pikselde yesil(0)->sari(0.5)->kirmizi(1) ama SADECE frac orani icinde
+        for i in range(0, fw, 3):
+            t = i / w   # 0..frac
+            if t < 0.5:
+                r = int(58 + (242-58) * (t/0.5)); g = 212; b = int(110 - 34*(t/0.5))
+            else:
+                r = 242; g = int(201 - (201-87) * ((t-0.5)/0.5)); b = int(76 - 29*((t-0.5)/0.5))
+            pygame.draw.rect(surf, (r, g, b), (x + i, y, 3, h))
+
     def draw_row(bars, row_top, row_bottom):
         n = len(bars)
-        slot_w = (WIDTH - 2*margin) // n
-        bar_w = max(6, int(slot_w * 0.22))
-        bar_top = row_top + 42
-        bar_bottom = row_bottom - 22
-        bar_h_full = bar_bottom - bar_top
+        gap = 8
+        card_w = (WIDTH - 2*margin - (n-1)*gap) // n
+        card_x0 = margin
+        card_top = row_top + 6
+        card_h = (row_bottom - row_top) - 12
+        # Font boyutu EN DAR satira (max kart) gore sabit -> ust/alt ayni buyuklukte
+        _max_n = 14
+        _ref_w = (WIDTH - 2*margin - (_max_n-1)*gap) // _max_n
+        cardf = _sm_font(int(_ref_w * 0.32))   # buyuk rakam (sabit, iki satir ayni)
+        unitf2 = _sm_font(max(14, int(_ref_w * 0.16)), bold=False)
+        lblf2 = _sm_font(max(14, int(_ref_w * 0.17)))
         for idx, (lbl, vtxt, unit, frac, color) in enumerate(bars):
             frac = max(0.0, min(1.0, frac))
-            slot_x = margin + idx * slot_w
-            cx = slot_x + slot_w // 2
-            x = cx - bar_w // 2
-            pygame.draw.rect(surf, DARK, (x, bar_top, bar_w, bar_h_full))
-            fh = int(bar_h_full * frac)
-            pygame.draw.rect(surf, color, (x, bar_bottom - fh, bar_w, fh))
-            pygame.draw.rect(surf, GREY, (x, bar_top, bar_w, bar_h_full), 1)
-            vts = vtxt + (unit if unit else "")
-            vs = vfont.render(vts, True, color)
-            surf.blit(vs, (cx - vs.get_width()//2, row_top + 2))
-            ls = lfont.render(lbl, True, WHITE)
-            surf.blit(ls, (cx - ls.get_width()//2, bar_bottom + 3))
+            cx0 = card_x0 + idx * (card_w + gap)
+            ccx = cx0 + card_w // 2
+            # kart arka plani
+            pygame.draw.rect(surf, (22, 27, 34), (cx0, card_top, card_w, card_h), border_radius=12)
+            pygame.draw.rect(surf, (35, 43, 54), (cx0, card_top, card_w, card_h), 1, border_radius=12)
+            # buyuk rakam (durum rengi)
+            vs = cardf.render(vtxt, True, color)
+            surf.blit(vs, (ccx - vs.get_width()//2, card_top + int(card_h*0.13)))
+            # birim
+            if unit:
+                us = unitf2.render(unit, True, (139, 152, 168))
+                surf.blit(us, (ccx - us.get_width()//2, card_top + int(card_h*0.44)))
+            # etiket
+            ls = lblf2.render(lbl, True, (200, 210, 222))
+            surf.blit(ls, (ccx - ls.get_width()//2, card_top + int(card_h*0.60)))
+            # YATAY gradient bar (canli - frac'a gore anlik)
+            bar_m = int(card_w * 0.10)
+            bx = cx0 + bar_m
+            bw = card_w - 2*bar_m
+            bh = max(10, int(card_h*0.10))
+            by = card_top + card_h - bh - int(card_h*0.10)
+            draw_grad_bar(bx, by, bw, bh, frac)
 
     half = HEIGHT // 2
     draw_row(bars_top, 0, half)
@@ -1076,14 +1110,15 @@ def main():
             if snap and max(snap) > 2:
                 _state["last_sound"] = time.time()
             idle = (time.time() - _state.get("last_sound", 0)) > 8.0
-            if idle:
+            # Sistem Monitoru sesten BAGIMSIZ - idle'a dusmez, her zaman gosterilir
+            if mode == "Sistem Monitoru":
+                draw_sysmon(surf, FPS)
+            elif idle:
                 draw_idle_screen(surf, time.time() - t0)
             elif mode == "LED Spektrum":
                 draw_led_spectrum(surf, snap, FPS)
             elif mode == "VU Metre":
                 draw_vu_meter(surf, snap)
-            elif mode == "Sistem Monitoru":
-                draw_sysmon(surf, FPS)
             elif mode == "Olcum Paneli":
                 draw_meter_panel(surf, snap)
             else:
