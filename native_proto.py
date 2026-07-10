@@ -909,7 +909,8 @@ def api_setup():
     try:
         session.get(f"{API_BASE}/health", timeout=2)
     except Exception:
-        subprocess.Popen(["trcc", "serve", "--port", "8080"],
+        # serve YOK -> biz baslatiyoruz, referansi sakla (cikista oldururuz)
+        _state["_serve_proc"] = subprocess.Popen(["trcc", "serve", "--port", "8080"],
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         time.sleep(5)
     # theme klasoru - ONCE TEMIZLE (eski trcc.json/config1.dc saat/tarih elementleri kalmasin)
@@ -1209,6 +1210,21 @@ def main():
             shm.close(); shm.unlink()
         except Exception:
             pass
+        # cava'yi durdur (arka planda kalmasin)
+        try:
+            cava.proc.terminate()
+        except Exception:
+            pass
+        # serve'u BIZ baslattiysak oldur (USB'yi birak - tekrar acilis takilmasin)
+        sp = _state.get("_serve_proc")
+        if sp is not None:
+            try:
+                sp.terminate()
+                sp.wait(timeout=3)
+            except Exception:
+                try: sp.kill()
+                except Exception: pass
+        print("Temiz kapandi.")
 
 
 if __name__ == "__main__":
