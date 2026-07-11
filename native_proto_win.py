@@ -601,7 +601,11 @@ def gradient_color(theme_name, ratio):
 
 # ==================== KAYNAK BULUCU ====================
 # ==================== SES: WASAPI LOOPBACK (Windows) ====================
-import soundcard as sc
+# ONEMLI: soundcard'i BURADA import ETMIYORUZ! Import edildiginde ana thread'de
+# COM'u MTA modunda baslatiyor; Qt ise tepsi ikonu icin STA istiyor -> catisma
+# ("OleInitialize failed: RPC_E_CHANGED_MODE") -> tray ikonu OLU kalir.
+# Cozum: soundcard SADECE ses thread'i icinde import edilir (asagida).
+sc = None   # ses thread'inde doldurulur
 
 _HALF = NUM_BARS // 2
 _freq_bins = np.fft.rfftfreq(BLOCK, 1.0 / SAMPLE_RATE)
@@ -619,6 +623,8 @@ _tilt = np.linspace(1.0, 2.4, _HALF).astype(np.float32)
 
 
 def _default_speaker_name():
+    if sc is None:
+        return None
     try:
         return sc.default_speaker().name
     except Exception:
@@ -649,12 +655,20 @@ class LoopbackReader:
         return np.concatenate([vals[:, 0], vals[:, 1]]).astype(np.float32)
 
     def _loop(self):
-        # Windows: arka plan thread'inde COM baslatilmali
+        # Windows: COM'u BU thread'de baslat + soundcard'i BURADA import et
+        # (ana thread temiz kalsin ki Qt tepsi ikonu STA alabilsin)
+        global sc
         try:
             import ctypes
             ctypes.windll.ole32.CoInitializeEx(None, 0x2)
         except Exception as e:
             print("COM init uyarisi:", e)
+        try:
+            import soundcard as _sc
+            sc = _sc
+        except Exception as e:
+            print("soundcard yuklenemedi:", e)
+            return
 
         while self._running:
             name = _default_speaker_name()
@@ -1143,6 +1157,19 @@ def _parse_args():
 
 
 def main():
+    # --- COM'u EN BASTA STA olarak baslat (Qt tepsi ikonu icin SART) ---
+    # Baska bir sey (SDL/pygame) once MTA baslatirsa Qt'nin OleInitialize'i
+    # RPC_E_CHANGED_MODE ile patlar -> tepsi ikonu gorunur ama TIKLANMAZ.
+    try:
+        import ctypes
+        hr = ctypes.windll.ole32.CoInitializeEx(None, 0x2)   # 0x2 = STA
+        if hr in (0, 1):
+            print("COM: STA (tepsi ikonu icin hazir)")
+        else:
+            print(f"COM zaten baslatilmis (hr=0x{hr & 0xffffffff:08x})")
+    except Exception as e:
+        print("COM init uyarisi:", e)
+
     # argv: mod adi + --layout N + --autostart / --no-tray bayraklari
     args = _parse_args()          # --layout N'yi isler ve listeden cikarir
     autostart = "--autostart" in args
@@ -1288,4 +1315,7 @@ def main():
 
 
 if __name__ == "__main__":
+    # PyInstaller + multiprocessing (Windows SPAWN): SART!
+    # Olmazsa sender sureci tum uygulamayi bastan baslatir (sonsuz dongu).
+    mp.freeze_support()
     main()
