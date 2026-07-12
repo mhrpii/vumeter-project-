@@ -33,6 +33,10 @@ import time
 
 import usb.core
 import usb.util
+try:
+    import usb.backend.libusb1 as _libusb1
+except Exception:
+    _libusb1 = None
 
 VID = 0x0416
 PID = 0x5408
@@ -76,16 +80,17 @@ class TrccDirect:
 
     # ---------- baglanti ----------
     def connect(self):
-        # Windows'ta libusb DLL'ini bul (trcc kurulumundan da olabilir)
+        # Windows'ta libusb DLL'ini bul (trcc kurulumundan da olabilir).
+        # NOT: import fonksiyon icinde OLMAMALI - Python 'usb'yi yerel degisken
+        # sayar ve Linux'ta (blok calismayinca) UnboundLocalError verir.
         backend = None
         if sys.platform == "win32":
-            import usb.backend.libusb1
             for dll in (
                 os.path.join(os.path.dirname(os.path.abspath(__file__)), "libusb-1.0.dll"),
                 r"C:\Program Files\TRCC\libusb-1.0.dll",
             ):
                 if os.path.exists(dll):
-                    backend = usb.backend.libusb1.get_backend(find_library=lambda x, d=dll: d)
+                    backend = _libusb1.get_backend(find_library=lambda x, d=dll: d)
                     if backend:
                         break
 

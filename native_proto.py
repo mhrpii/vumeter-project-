@@ -22,9 +22,9 @@ import pygame
 # ==================== SABITLER ====================
 WIDTH, HEIGHT = 1920, 462          # NATIVE YATAY (panel kendi donduruyor)
 NUM_BARS = 204
-API_BASE = "http://127.0.0.1:8080"
-DEVICE_KEY = "0416:5408"
-THEME_DIR = os.path.expanduser("~/.trcc-user/live_frame")
+# NOT: trcc / HTTP API / tema klasoru ARTIK KULLANILMIYOR.
+# Panele dogrudan USB ile yaziliyor (trcc_direct.py).
+DEVICE_KEY = "0416:5408"   # (sadece bilgi amacli)
 FPS = 30                            # native API'de daha yuksek denenebilir
 
 CAVA_SOURCE_FALLBACK = "alsa_output.usb-Focusrite_Scarlett_Solo_4th_Gen_S1TTKRP5739DF7-00.HiFi__Line1__sink.monitor"
@@ -875,17 +875,30 @@ def draw_spectrum(surf, cava_bars, theme_name, fps):
 
 
 # ==================== API SENDER (ayri process) ====================
-def sender_process_main(shm_name, frame_counter, w, h, api_base, key, theme_dir):
-    import requests as rq
+def sender_process_main(shm_name, frame_counter, w, h, *_unused):
+    """Ayri surec: shared memory'den kareyi al -> DOGRUDAN USB ile panele yaz.
+    trcc / HTTP / PNG / disk YOK. (trcc_direct.py protokolu kullanir)"""
     import pygame as pg
     # mixer'siz init (ses aygiti acmasin - LG OSD tetiklemesin)
     os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
+    os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
     pg.display.init()
+
+    from trcc_direct import TrccDirect
+    dev = TrccDirect()
+    try:
+        dev.connect()
+    except Exception as e:
+        print(f"[sender] PANEL BAGLANTI HATASI: {e}")
+        print("[sender] trcc calisiyor olabilir -> 'pkill -f trcc' yapip tekrar dene")
+        return
+
     shm = shared_memory.SharedMemory(name=shm_name)
-    session = rq.Session()
-    png_path = os.path.join(theme_dir, "00.png")
-    url = f"{api_base}/devices/{key}/display/theme"
+    print("[sender] dogrudan USB akisi basladi.")
     last = -1
+    errs = 0
+    win_t0 = time.time()
+    win_sent = 0
     try:
         while True:
             cur = frame_counter.value
@@ -893,59 +906,29 @@ def sender_process_main(shm_name, frame_counter, w, h, api_base, key, theme_dir)
                 break
             if cur != last:
                 last = cur
-                raw = bytes(shm.buf[:w*h*3])
+                raw = bytes(shm.buf[:w * h * 3])
                 try:
                     surf = pg.image.frombuffer(raw, (w, h), "RGB")
-                    pg.image.save(surf, png_path)
-                    session.post(url, json={"path": "live_frame"}, timeout=2.0)
-                except Exception:
-                    pass
+                    dev.send_surface(surf)
+                    win_sent += 1
+                    now = time.time()
+                    if now - win_t0 >= 10.0:
+                        print(f"[sender] panele giden: {win_sent/(now-win_t0):.1f} FPS")
+                        win_t0 = now
+                        win_sent = 0
+                except Exception as e:
+                    errs += 1
+                    if errs <= 3 or errs % 50 == 0:
+                        print(f"[sender] HATA #{errs}: {type(e).__name__}: {e}")
+                    time.sleep(0.05)
             else:
-                time.sleep(0.003)
+                time.sleep(0.002)
     finally:
         shm.close()
-
-
-def api_setup():
-    """serve baslat + connect + fit-mode + theme klasoru."""
-    import requests as rq
-    session = rq.Session()
-    # serve calisiyor mu
-    try:
-        session.get(f"{API_BASE}/health", timeout=2)
-    except Exception:
-        # serve YOK -> biz baslatiyoruz, referansi sakla (cikista oldururuz)
-        _state["_serve_proc"] = subprocess.Popen(["trcc", "serve", "--port", "8080"],
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        time.sleep(5)
-    # theme klasoru - ONCE TEMIZLE (eski trcc.json/config1.dc saat/tarih elementleri kalmasin)
-    os.makedirs(THEME_DIR, exist_ok=True)
-    import glob
-    for old_cfg in glob.glob(os.path.join(THEME_DIR, "*.json")) + glob.glob(os.path.join(THEME_DIR, "*.dc")):
-        try: os.remove(old_cfg)
-        except OSError: pass
-    cfg = os.path.join(THEME_DIR, "config.json")
-    with open(cfg, "w") as f:
-        f.write('{"name": "live_frame", "elements": []}\n')
-    # connect - retry'li (acilista panel/serve hazir olmayabilir)
-    for attempt in range(6):
         try:
-            r = session.post(f"{API_BASE}/devices/{DEVICE_KEY}/connect", timeout=10)
-            msg = r.json().get("message", r.text)
-            if r.json().get("ok") or "Connected" in str(msg):
-                print("connect:", str(msg)[:60])
-                session.post(f"{API_BASE}/devices/{DEVICE_KEY}/display/fit-mode",
-                            json={"mode": "stretch"}, timeout=5)
-                session.post(f"{API_BASE}/devices/{DEVICE_KEY}/display/brightness",
-                            json={"percent": _state.get("brightness", 100)}, timeout=5)
-                return True
-            else:
-                print(f"connect deneme {attempt+1}: {str(msg)[:50]}")
-        except Exception as e:
-            print(f"connect deneme {attempt+1} hata: {e}")
-        time.sleep(3)
-    print("API setup basarisiz (6 deneme). USB mesgul olabilir.")
-    return False
+            dev.close()
+        except Exception:
+            pass
 
 
 # ==================== TRAY MENU (PyQt5) ====================
@@ -1109,10 +1092,6 @@ def main():
         print("Autostart: sistemin oturmasi bekleniyor...")
         wait_until_ready()
 
-    if not api_setup():
-        print("API kurulamadi, cikiliyor.")
-        return
-
     cava = CavaReader()
 
     # B+: autostart'ta cava GERCEKTEN veri uretene kadar bekle (atlama onleme)
@@ -1139,8 +1118,7 @@ def main():
     shm = shared_memory.SharedMemory(create=True, size=WIDTH*HEIGHT*3)
     frame_counter = mp.Value("q", 0, lock=False)
     send_proc = mp.Process(target=sender_process_main,
-                          args=(shm.name, frame_counter, WIDTH, HEIGHT,
-                                API_BASE, DEVICE_KEY, THEME_DIR), daemon=True)
+                          args=(shm.name, frame_counter, WIDTH, HEIGHT), daemon=True)
     send_proc.start()
 
     print(f"Baslatildi. Native {WIDTH}x{HEIGHT}, {FPS} FPS, Spektrum. Ctrl+C ile cik.")
@@ -1177,15 +1155,10 @@ def main():
             # tray olaylarini isle
             if qt_app is not None:
                 qt_app.processEvents()
-            # parlaklik degistiyse API'ye gonder
+            # NOT: parlaklik trcc HTTP API ozelligiydi; dogrudan USB protokolunde
+            # parlaklik komutu yok. Bayrak temizlenir (menu calisir ama etkisiz).
             if _state.get("brightness_changed"):
                 _state["brightness_changed"] = False
-                try:
-                    import requests as _rq
-                    _rq.post(f"{API_BASE}/devices/{DEVICE_KEY}/display/brightness",
-                             json={"percent": _state["brightness"]}, timeout=2)
-                except Exception:
-                    pass
 
             # FPS sinirla
             dt = 1.0 / FPS
@@ -1200,13 +1173,13 @@ def main():
         print("\nCikiliyor...")
     finally:
         _state["running"] = False
-        # Cikista paneli TEMIZLE (eski goruntu donuk kalmasin) - siyah kare gonder
+        # Cikista paneli TEMIZLE: siyah kareyi shared memory'ye yaz, sender USB'ye gonderir
         try:
-            import requests as _rq
             black = pygame.Surface((WIDTH, HEIGHT)); black.fill((0, 0, 0))
-            pygame.image.save(black, os.path.join(THEME_DIR, "00.png"))
-            _rq.post(f"{API_BASE}/devices/{DEVICE_KEY}/display/theme",
-                     json={"path": "live_frame"}, timeout=2)
+            shm.buf[:WIDTH*HEIGHT*3] = pygame.image.tostring(black, "RGB")
+            frames += 1
+            frame_counter.value = frames
+            time.sleep(0.35)          # sender siyah kareyi yollasin
         except Exception:
             pass
         frame_counter.value = -1
@@ -1220,15 +1193,6 @@ def main():
             cava.proc.terminate()
         except Exception:
             pass
-        # serve'u BIZ baslattiysak oldur (USB'yi birak - tekrar acilis takilmasin)
-        sp = _state.get("_serve_proc")
-        if sp is not None:
-            try:
-                sp.terminate()
-                sp.wait(timeout=3)
-            except Exception:
-                try: sp.kill()
-                except Exception: pass
         print("Temiz kapandi.")
 
 
