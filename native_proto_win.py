@@ -24,19 +24,49 @@ import multiprocessing as mp
 from multiprocessing import shared_memory
 
 # --- console=False (pencere modu exe): stdout/stderr None olur -> print() patlar
-#     Bos bir yazici koyuyoruz ki tum print/write cagrilari sorunsuz calissin.
-class _NullIO:
-    def write(self, *a, **k):
-        pass
+#     Cozum: ciktilari LOG DOSYASINA yaz (hata ayiklama icin sart).
+_LOG_PATH = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")),
+                         "trcc-user", "vumeter_lcd.log")
 
-    def flush(self, *a, **k):
-        pass
+
+class _LogIO:
+    """stdout/stderr yerine gecer: log dosyasina yazar (console yoksa)."""
+
+    def __init__(self, path):
+        self.path = path
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+        except Exception:
+            pass
+        self._f = None
+        try:
+            self._f = open(path, "a", encoding="utf-8", buffering=1)
+        except Exception:
+            self._f = None
+
+    def write(self, s):
+        if self._f:
+            try:
+                self._f.write(s)
+            except Exception:
+                pass
+
+    def flush(self):
+        if self._f:
+            try:
+                self._f.flush()
+            except Exception:
+                pass
 
 
 if sys.stdout is None:
-    sys.stdout = _NullIO()
+    sys.stdout = _LogIO(_LOG_PATH)
 if sys.stderr is None:
-    sys.stderr = _NullIO()
+    sys.stderr = sys.stdout
+
+# exe'de calisiyorsak log basligi at
+if getattr(sys, "frozen", False):
+    print(f"\n===== VumeterLCD basladi: {time.strftime('%Y-%m-%d %H:%M:%S')} =====")
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")  # penceresiz
 import pygame
@@ -47,7 +77,7 @@ NUM_BARS = 204
 API_BASE = "http://127.0.0.1:8080"
 DEVICE_KEY = "0416:5408"
 THEME_DIR = os.path.join(os.environ.get("LOCALAPPDATA", ""), "trcc-user", "live_frame")
-FPS = 12                            # LCD: panelin USB kapasitesi ~13 FPS
+FPS = 25                            # post ~6ms olculdu -> 25 FPS rahat
                                     # (1920x462 kare = 1.8MB, USB transfer ~70ms)
                                     # 12 FPS = kuyruk birikmez, donma olmaz
 
@@ -850,11 +880,11 @@ def draw_spectrum(surf, cava_bars, theme_name, fps):
 def sender_process_main(shm_name, frame_counter, w, h, api_base, key, theme_dir):
     """Ayri surec: shared memory'den kareyi al -> PNG yaz -> trcc API'ye bildir.
     Windows: multiprocessing SPAWN kullanir (modul yeniden import edilir)."""
-    # pencere modu exe'de bu surecin stdout'u None olabilir -> print patlamasin
+    # pencere modu exe'de bu surecin stdout'u None olabilir -> log dosyasina yaz
     if sys.stdout is None:
-        sys.stdout = _NullIO()
+        sys.stdout = _LogIO(_LOG_PATH)
     if sys.stderr is None:
-        sys.stderr = _NullIO()
+        sys.stderr = sys.stdout
     import requests as rq
     import pygame as pg
     os.environ.setdefault("SDL_AUDIODRIVER", "dummy")

@@ -2,8 +2,13 @@
 """VintageAudioConsole - WINDOWS surumu.
 Bilgisayarda CALAN sesi WASAPI loopback ile yakalar (cava gerekmez).
 Cikis aygiti otomatik secilir ve degisirse otomatik takip edilir."""
+import sys
+import os
+import math
+import shutil
 import subprocess
 import numpy as np
+
 # --- console=False (pencere modu exe): stdout/stderr None olur -> print() patlar
 class _NullIO:
     def write(self, *a, **k):
@@ -19,10 +24,6 @@ if sys.stderr is None:
     sys.stderr = _NullIO()
 
 import pygame
-import sys
-import math
-import os
-import shutil
 import threading
 import time
 
