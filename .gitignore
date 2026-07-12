@@ -13,3 +13,13 @@ jitter.py
 voltest.py
 bartest.py
 sensors_probe*.py
+apicheck.py
+colortest.py
+fireforget.py
+lcdspeed.py
+overlay_off.py
+patch_sysmon_window.py
+sendtest.py
+sendtest2.py
+fpsprofil*.py
+api.json
