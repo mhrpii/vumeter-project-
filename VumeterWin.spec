@@ -1,22 +1,18 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""VintageAudioConsole - Windows .exe (SENSORLU + YONETICI)
+"""VintageAudioConsole - Windows MASAUSTU .exe
 
-Kullanim:
+Kullanim (NORMAL PowerShell, yonetici degil):
     py -3.12 -m PyInstaller VumeterWin.spec --clean
 
 Cikti: dist\VintageAudioConsole.exe
 
-ONEMLI: uac_admin=True -> exe cift tiklaninca Windows otomatik "yonetici olarak
-        calistir" ister. Sensorler (sicaklik/fan) icin SART.
-
-Not: console=False (hata gorunur). Sorunsuz calisinca False yapip yeniden derle.
+uac_admin=True -> calisirken yonetici ister (sensorler icin sart).
+console=False  -> siyah terminal penceresi acilmaz (stdout korumasi kodda var).
 """
-
 import glob as _glob
 import os as _os
 
-# LHM ve TUM bagimliliklari (System.Memory.dll, System.Buffers.dll, HidSharp.dll ...)
-# Klasordeki her .dll pakete gomulur - eksik bagimlilik kalmasin.
+# LHM + tum bagimliliklari (sensorler icin)
 _ALL_DLLS = [(p, '.') for p in _glob.glob('*.dll')]
 print("PAKETE GOMULEN DLL'ler:", [_os.path.basename(p) for p, _ in _ALL_DLLS])
 
@@ -69,11 +65,11 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False,
+    console=False,          # siyah pencere yok (stdout korumasi kodda)
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    uac_admin=True,
+    uac_admin=True,         # yonetici (sensorler icin)
 )

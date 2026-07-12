@@ -4,6 +4,20 @@ Bilgisayarda CALAN sesi WASAPI loopback ile yakalar (cava gerekmez).
 Cikis aygiti otomatik secilir ve degisirse otomatik takip edilir."""
 import subprocess
 import numpy as np
+# --- console=False (pencere modu exe): stdout/stderr None olur -> print() patlar
+class _NullIO:
+    def write(self, *a, **k):
+        pass
+
+    def flush(self, *a, **k):
+        pass
+
+
+if sys.stdout is None:
+    sys.stdout = _NullIO()
+if sys.stderr is None:
+    sys.stderr = _NullIO()
+
 import pygame
 import sys
 import math
@@ -73,6 +87,13 @@ state = {
 # pygame.init() ses mixer'ini da baslatir -> mixer bir ses aygiti acar ->
 # PipeWire/KDE "ses aygiti degisti" OSD'sini tetikler (LG monitorde profil
 # listesi belirir). Biz ses CALMIYORUZ (cava'dan okuyoruz), mixer'a gerek yok.
+# --- COM'u EN BASTA STA baslat (Qt tepsi ikonu icin SART) ---
+try:
+    import ctypes as _ct
+    _ct.windll.ole32.CoInitializeEx(None, 0x2)   # 0x2 = STA
+except Exception:
+    pass
+
 os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
 pygame.display.init()
 pygame.font.init()
@@ -91,7 +112,10 @@ font_vu_power = pygame.font.SysFont("Menlo", 22, bold=True)
 #  Linux'taki cava'nin yerini alir. Cikis aygiti (Scarlett/kulaklik/HDMI)
 #  OTOMATIK secilir ve degisirse otomatik takip edilir.
 # ============================================================
-import soundcard as sc
+# soundcard'i BURADA import etmiyoruz: import aninda ana thread'de COM'u MTA
+# baslatir, Qt ise tepsi ikonu icin STA ister -> tray TIKLANMAZ olur.
+# Cozum: sadece ses thread'i icinde import edilir (asagida).
+sc = None
 
 SAMPLE_RATE = 48000
 BLOCK = 8192            # FFT penceresi (buyuk = bas barlari AYRISIR, grup hareket biter)
@@ -122,6 +146,8 @@ _tilt = np.linspace(1.0, 2.4, HALF_BARS).astype(np.float32)
 
 def _default_speaker_name():
     """Windows varsayilan CIKIS aygitinin adi (otomatik secim icin)."""
+    if sc is None:
+        return None
     try:
         return sc.default_speaker().name
     except Exception:
@@ -164,13 +190,20 @@ class LoopbackReader:
         return out, peak
 
     def _loop(self):
-        # Windows: soundcard'i ARKA PLAN THREAD'inde kullanmak icin COM baslatilmali.
-        # (Ana thread'de otomatik olur, thread'de olmaz -> sessizce hata verir)
+        # COM'u BU thread'de baslat + soundcard'i BURADA import et
+        # (ana thread temiz kalsin ki Qt tepsi ikonu STA alabilsin)
+        global sc
         try:
             import ctypes
             ctypes.windll.ole32.CoInitializeEx(None, 0x2)  # APARTMENTTHREADED
         except Exception as _e:
             print("COM init uyarisi:", _e)
+        try:
+            import soundcard as _sc
+            sc = _sc
+        except Exception as _e:
+            print("soundcard yuklenemedi:", _e)
+            return
 
         while self._running:
             name = _default_speaker_name()

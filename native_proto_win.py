@@ -23,6 +23,21 @@ import numpy as np
 import multiprocessing as mp
 from multiprocessing import shared_memory
 
+# --- console=False (pencere modu exe): stdout/stderr None olur -> print() patlar
+#     Bos bir yazici koyuyoruz ki tum print/write cagrilari sorunsuz calissin.
+class _NullIO:
+    def write(self, *a, **k):
+        pass
+
+    def flush(self, *a, **k):
+        pass
+
+
+if sys.stdout is None:
+    sys.stdout = _NullIO()
+if sys.stderr is None:
+    sys.stderr = _NullIO()
+
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")  # penceresiz
 import pygame
 
@@ -32,7 +47,9 @@ NUM_BARS = 204
 API_BASE = "http://127.0.0.1:8080"
 DEVICE_KEY = "0416:5408"
 THEME_DIR = os.path.join(os.environ.get("LOCALAPPDATA", ""), "trcc-user", "live_frame")
-FPS = 15                            # LCD: 15 yeterli ve dayanikli (30 denenebilir)
+FPS = 12                            # LCD: panelin USB kapasitesi ~13 FPS
+                                    # (1920x462 kare = 1.8MB, USB transfer ~70ms)
+                                    # 12 FPS = kuyruk birikmez, donma olmaz
 
 # --- WASAPI loopback ses ayarlari (vumeter_win.py ile ayni) ---
 SAMPLE_RATE = 48000
@@ -833,6 +850,11 @@ def draw_spectrum(surf, cava_bars, theme_name, fps):
 def sender_process_main(shm_name, frame_counter, w, h, api_base, key, theme_dir):
     """Ayri surec: shared memory'den kareyi al -> PNG yaz -> trcc API'ye bildir.
     Windows: multiprocessing SPAWN kullanir (modul yeniden import edilir)."""
+    # pencere modu exe'de bu surecin stdout'u None olabilir -> print patlamasin
+    if sys.stdout is None:
+        sys.stdout = _NullIO()
+    if sys.stderr is None:
+        sys.stderr = _NullIO()
     import requests as rq
     import pygame as pg
     os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
@@ -905,11 +927,22 @@ def api_setup():
         session.get(f"{API_BASE}/health", timeout=2)
         print("trcc serve zaten calisiyor.")
     except Exception:
-        print("trcc serve baslatiliyor...")
+        print("trcc serve baslatiliyor (gizli)...")
+        # PENCERE GIZLEME: DETACHED_PROCESS kullanma! Konsol uygulamasi olan
+        # trcc.exe detached baslatilinca KENDI konsolunu acar (siyah pencere).
+        # Dogrusu: CREATE_NO_WINDOW + STARTUPINFO(SW_HIDE)
+        _flags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+        _flags |= getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+
+        _si = subprocess.STARTUPINFO()
+        _si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        _si.wShowWindow = 0   # SW_HIDE
+
         _state["_serve_proc"] = subprocess.Popen(
             ["trcc", "serve", "--port", "8080"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            stdin=subprocess.DEVNULL,
+            creationflags=_flags, startupinfo=_si)
         for _ in range(20):
             time.sleep(1)
             try:
@@ -1302,15 +1335,15 @@ def main():
             cava.stop()
         except Exception:
             pass
-        # serve'u BIZ baslattiysak oldur (USB'yi birak - tekrar acilis takilmasin)
+        # ---- trcc serve'i ACIK BIRAK (KRITIK PERFORMANS KURALI) ----
+        # trcc serve ILK tema yuklemesinde LHM'yi arar ve ~60 sn bekler.
+        # Serve'i oldurursek her acilista bu cezayi tekrar oderiz.
+        # Acik birakirsak: ilk acilis 60 sn, sonraki acilislar ANINDA.
+        # (Serve'i kapatmak icin: trcc kill)
         sp = _state.get("_serve_proc")
         if sp is not None:
-            try:
-                sp.terminate()
-                sp.wait(timeout=3)
-            except Exception:
-                try: sp.kill()
-                except Exception: pass
+            print("trcc serve acik birakiliyor (sonraki acilis hizli olsun).")
+            print("  Tamamen kapatmak icin: trcc kill")
         print("Temiz kapandi.")
 
 
