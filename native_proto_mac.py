@@ -27,8 +27,59 @@ NUM_BARS = 204
 DEVICE_KEY = "0416:5408"   # (sadece bilgi amacli)
 FPS = 30                            # native API'de daha yuksek denenebilir
 
-# --- MAC ses: portaudio + sabit Scarlett kaynagi (Linux PipeWire monitor yerine) ---
-MAC_AUDIO_SOURCE = "Scarlett Solo 4th Gen"
+# --- MAC ses: portaudio + OTOMATIK ses kaynagi (sabit degil) ---
+# Once BlackHole/loopback (sistem sesini yakalar), yoksa varsayilan cikis/giris.
+# Boylece her Mac'te calisir (Scarlett'e bagimli degil).
+_MAC_AUDIO_CACHE = {"src": None}
+
+def _detect_mac_audio_source():
+    """cava (portaudio) icin uygun ses kaynagini otomatik bul.
+    Mantik: cava, sesin CIKTIGI aygiti dinlemeli (o aygitin sesini gorsellestirir).
+    Oncelik:
+      1) VARSAYILAN CIKIS aygiti (gercek ses oradan cikar - en dogru)
+      2) BlackHole/loopback (sistem sesini yakalayan sanal aygit)
+      3) Scarlett/Focusrite/USB arayuz
+      4) ilk ses aygiti"""
+    if _MAC_AUDIO_CACHE["src"]:
+        return _MAC_AUDIO_CACHE["src"]
+    src = None
+    default_out = None
+    names = []
+    try:
+        out = subprocess.run(["system_profiler", "SPAudioDataType"],
+                             capture_output=True, text=True, timeout=8).stdout
+        cur = None
+        for line in out.splitlines():
+            raw = line.rstrip()
+            s = raw.strip()
+            # aygit adi: girintili, ':' ile biten, alt satirlarinda ozellikler
+            if s.endswith(":") and "Devices" not in s and "Audio" not in s:
+                cur = s[:-1].strip()
+                if cur and cur not in names:
+                    names.append(cur)
+            # varsayilan cikis aygiti isareti
+            if "Default Output Device: Yes" in s and cur:
+                default_out = cur
+    except Exception:
+        pass
+
+    def pick(keywords):
+        for n in names:
+            for kw in keywords:
+                if kw.lower() in n.lower():
+                    return n
+        return None
+
+    src = (default_out
+           or pick(["Scarlett", "Focusrite", "USB", "Speakers", "Hoparlor"])
+           or pick(["BlackHole", "Soundflower", "Loopback", "Aggregate"])
+           or (names[0] if names else None))
+    if not src:
+        src = "default"
+    _MAC_AUDIO_CACHE["src"] = src
+    return src
+
+MAC_AUDIO_SOURCE = _detect_mac_audio_source()
 CAVA_SOURCE_FALLBACK = MAC_AUDIO_SOURCE
 CAVA_CONFIG = os.path.expanduser("~/.config/cava/config_native")
 
@@ -839,7 +890,7 @@ sensitivity = 100
 
 [input]
 method = portaudio
-source = {MAC_AUDIO_SOURCE}
+source = {_detect_mac_audio_source()}
 
 [output]
 method = raw
@@ -849,8 +900,8 @@ ascii_max_range = 255
 
 
 def _find_scarlett_monitor():
-    """Mac: pactl yok -> sabit kaynak."""
-    return MAC_AUDIO_SOURCE
+    """Mac: pactl yok -> otomatik ses kaynagi."""
+    return _detect_mac_audio_source()
 
 
 def _wait_for_source(timeout=90):
