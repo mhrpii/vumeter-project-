@@ -284,8 +284,10 @@ class SysMonitor:
                     d["gpu_vram_total"] = (used + free) / 1024.0  # GB
                 # GPU fan (varsa)
                 d["gpu_fan_rpm"] = int(g["fan"]) if g.get("fan") else None
-                # GPU memory clock (MHz) -> GMHz gauge
+                # GPU memory clock (MHz) -> GBellek gauge
                 d["gpu_mem_clock"] = g.get("memclock")
+                # GPU core clock (MHz) -> GClock gauge (GEdge yerine)
+                d["gpu_core_clock"] = g.get("coreclock")
 
             # diskler yavas isinir -> 10 sn'de bir oku (disk_read ~1sn surer)
             now = time.time()
