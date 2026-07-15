@@ -26,6 +26,8 @@ _GPU_BIN = os.path.join(_HERE, "gpu_read")
 _GPU_SRC = os.path.join(_HERE, "gpu_read.c")
 _DISK_BIN = os.path.join(_HERE, "disk_read")
 _DISK_SRC = os.path.join(_HERE, "disk_read.c")
+_IPG_BIN = os.path.join(_HERE, "ipg_read")
+_IPG_SRC = os.path.join(_HERE, "ipg_read.c")
 
 
 def _ensure_built(binp, srcp, name):
@@ -108,6 +110,64 @@ def _read_gpu():
     return result
 
 
+def _ensure_ipg_built():
+    """ipg_read'i IntelPowerGadget framework'u ile derle."""
+    if os.path.isfile(_IPG_BIN) and os.access(_IPG_BIN, os.X_OK):
+        return True
+    if not os.path.isfile(_IPG_SRC):
+        return False
+    try:
+        r = subprocess.run(
+            ["clang", "-O2", "-o", _IPG_BIN, _IPG_SRC,
+             "-F/Library/Frameworks", "-framework", "IntelPowerGadget"],
+            capture_output=True, text=True, timeout=60)
+        if r.returncode == 0 and os.path.isfile(_IPG_BIN):
+            os.chmod(_IPG_BIN, 0o755)
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _read_ipg():
+    """ipg_read ile Intel verisi: paket + 24 cekirdek -> dict."""
+    result = {"cores": []}
+    if not os.path.isfile(_IPG_BIN):
+        return result
+    try:
+        out = subprocess.run([_IPG_BIN], capture_output=True, text=True, timeout=4)
+        cores = {}
+        for line in out.stdout.splitlines():
+            line = line.strip()
+            if "=" not in line:
+                continue
+            # "c0_f=4784  c0_t=46" iki deger olabilir
+            for part in line.split():
+                if "=" not in part:
+                    continue
+                k, v = part.split("=", 1)
+                try:
+                    fv = float(v)
+                except ValueError:
+                    continue
+                if k.startswith("c") and ("_f" in k or "_t" in k):
+                    # cN_f / cN_t
+                    num = int(k[1:k.index("_")])
+                    cores.setdefault(num, {})
+                    cores[num]["freq" if k.endswith("_f") else "temp"] = fv
+                else:
+                    result[k] = fv
+        # cekirdekleri sirali listeye cevir
+        n = int(result.get("num_cores", len(cores)))
+        result["cores"] = [
+            (i, cores.get(i, {}).get("freq", 0), cores.get(i, {}).get("temp", 0))
+            for i in range(n)
+        ]
+    except Exception:
+        pass
+    return result
+
+
 def _read_disks():
     """disk_read ile tum disklerin sicakligini oku -> [(model, temp, tip), ...]."""
     disks = []
@@ -134,8 +194,11 @@ class SysMonitor:
         _ensure_built(_SMC_BIN, _SMC_SRC, "smc_read")     # SMC okuyucu
         _ensure_built(_GPU_BIN, _GPU_SRC, "gpu_read")     # GPU okuyucu
         _ensure_built(_DISK_BIN, _DISK_SRC, "disk_read")  # disk sicaklik okuyucu
+        _ensure_ipg_built()   # Intel Power Gadget okuyucu
         self._disks = []
         self._disk_last = 0.0
+        self._ipg = {"cores": []}
+        self._ipg_last = 0.0
         self._interval = interval
         self._data = {}
         self._lock = threading.Lock()
@@ -227,6 +290,17 @@ class SysMonitor:
                 self._disks = _read_disks()
                 self._disk_last = now
             d["disks"] = self._disks
+
+            # Intel Power Gadget: 24 cekirdek (2 sn'de bir)
+            if now - self._ipg_last > 2.0:
+                self._ipg = _read_ipg()
+                self._ipg_last = now
+            d["ipg"] = self._ipg
+            # Intel'in daha dogru paket degerleriyle CPU'yu guncelle
+            if self._ipg.get("pkg_power"):
+                d["cpu_power"] = self._ipg["pkg_power"]
+            if self._ipg.get("pkg_temp"):
+                d["cpu_pkg"] = self._ipg["pkg_temp"]
 
             with self._lock:
                 self._data = d

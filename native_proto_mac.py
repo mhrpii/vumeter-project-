@@ -443,8 +443,93 @@ def draw_sysmon_disks(surf, disks):
     draw_disk_row(sata, half + 6, half - 40, "sata")
 
 
+def _core_heat_rgb(temp):
+    """Cekirdek sicakligina gore renk: mavi(soguk)->yesil->sari->kirmizi(sicak)."""
+    if temp <= 0:
+        return (30, 34, 42)   # uyuyan cekirdek: koyu gri
+    # 30C mavi, 50C yesil, 70C sari, 90C+ kirmizi
+    t = max(30.0, min(95.0, temp))
+    if t < 50:
+        f = (t - 30) / 20.0   # mavi -> yesil
+        return (int(40 + f*20), int(120 + f*110), int(200 - f*110))
+    elif t < 70:
+        f = (t - 50) / 20.0   # yesil -> sari
+        return (int(60 + f*195), int(230 - f*20), int(90 - f*80))
+    else:
+        f = (t - 70) / 25.0   # sari -> kirmizi
+        return (int(255), int(210 - f*160), int(10))
+
+
+def draw_sysmon_cores(surf, ipg):
+    """SAYFA 3: 24 cekirdek isi haritasi (Intel Power Gadget).
+    Her cekirdek renkli kutu: sicakliga gore renk + frekans/sicaklik yazi."""
+    surf.fill((8, 10, 8))
+    cores = ipg.get("cores") or []
+
+    # baslik SAG UST
+    tf = _sm_font(22)
+    ts = tf.render("ÇEKİRDEK ISI HARİTASI", True, (150, 165, 180))
+    surf.blit(ts, (WIDTH - ts.get_width() - 18, 8))
+
+    # paket ozeti SOL UST (hava'nin altina)
+    pf = _sm_font(20)
+    pw = ipg.get("pkg_power"); pt = ipg.get("pkg_temp"); tdp = ipg.get("tdp")
+    summary = []
+    if pt: summary.append(f"CPU {pt:.0f}°C")
+    if pw: summary.append(f"{pw:.0f}W")
+    if tdp: summary.append(f"TDP {tdp:.0f}W")
+    if summary:
+        ps = pf.render("   ".join(summary), True, (200, 210, 220))
+        surf.blit(ps, (18, 40))
+
+    if not cores:
+        f = _sm_font(30)
+        surf.blit(f.render("Intel Power Gadget verisi yok", True, (200, 120, 60)),
+                  (60, HEIGHT//2))
+        return
+
+    n = len(cores)
+    # 24 cekirdek -> 12 sutun x 2 satir
+    cols = 12
+    rows = (n + cols - 1) // cols
+    margin_x = 16
+    top = 72
+    gap = 6
+    cell_w = (WIDTH - 2*margin_x - (cols-1)*gap) // cols
+    avail_h = HEIGHT - top - 12
+    cell_h = (avail_h - (rows-1)*gap) // rows
+
+    for idx, (cnum, freq, temp) in enumerate(cores):
+        r = idx // cols
+        c = idx % cols
+        x = margin_x + c * (cell_w + gap)
+        y = top + r * (cell_h + gap)
+        col = _core_heat_rgb(temp)
+        # kutu
+        pygame.draw.rect(surf, col, (x, y, cell_w, cell_h), border_radius=8)
+        # cekirdek no (sol ust, kucuk)
+        nf = _sm_font(13)
+        ns = nf.render(f"C{cnum}", True, (255, 255, 255) if temp > 55 else (200, 210, 220))
+        surf.blit(ns, (x + 4, y + 3))
+        if temp > 0:
+            # sicaklik (buyuk, ortada)
+            tf2 = _sm_font(int(cell_h * 0.34))
+            tcol = (255, 255, 255) if temp > 55 else (20, 24, 20)
+            tsr = tf2.render(f"{temp:.0f}°", True, tcol)
+            surf.blit(tsr, (x + cell_w//2 - tsr.get_width()//2, y + int(cell_h*0.28)))
+            # frekans (alt, kucuk)
+            ff = _sm_font(13)
+            fs = ff.render(f"{freq/1000:.1f}G", True, tcol)
+            surf.blit(fs, (x + cell_w//2 - fs.get_width()//2, y + int(cell_h*0.68)))
+        else:
+            # uyuyan cekirdek
+            sf = _sm_font(14)
+            ss = sf.render("uyku", True, (90, 100, 110))
+            surf.blit(ss, (x + cell_w//2 - ss.get_width()//2, y + cell_h//2 - 8))
+
+
 def draw_sysmon(surf, fps):
-    """NATIVE yatay sistem monitoru. 2 sayfa: 0=sensorler, 1=disk sicakliklari."""
+    """NATIVE yatay sistem monitoru. 3 sayfa: 0=sensorler, 1=disk, 2=cekirdek."""
     surf.fill((8, 10, 8))
     mon = _get_sysmon()
     if mon is None:
@@ -455,6 +540,10 @@ def draw_sysmon(surf, fps):
     # SAYFA 1: disk sicakliklari
     if _state.get("sysmon_page", 0) == 1:
         draw_sysmon_disks(surf, d.get("disks") or [])
+        return
+    # SAYFA 2: cekirdek isi haritasi (Intel Power Gadget)
+    if _state.get("sysmon_page", 0) == 2:
+        draw_sysmon_cores(surf, d.get("ipg") or {})
         return
     GREEN = (60, 230, 90); DARK = (20, 24, 20); GREY = (60, 66, 60)
     WHITE = (80, 220, 215); DIM = (90, 175, 175)
@@ -1107,7 +1196,7 @@ def build_tray():
             _state["sysmon_page"] = p
         return _f
     sp_group = QActionGroup(menu); sp_group.setExclusive(True)
-    for pi, pn in [(0, "Sensorler"), (1, "Disk Sicakliklari")]:
+    for pi, pn in [(0, "Sensorler"), (1, "Disk Sicakliklari"), (2, "Cekirdek Isi Haritasi")]:
         a = QAction(pn, menu, checkable=True)
         a.setChecked(_state.get("mode")=="Sistem Monitoru" and _state.get("sysmon_page",0)==pi)
         a.triggered.connect(mk_sysmon_page(pi)); sp_group.addAction(a); smon_menu.addAction(a)
