@@ -21,6 +21,34 @@ except ImportError:
 # smc_read araci ayni klasorde (native_proto_mac.py ile birlikte)
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _SMC_BIN = os.path.join(_HERE, "smc_read")
+_SMC_SRC = os.path.join(_HERE, "smc_read.c")
+_GPU_BIN = os.path.join(_HERE, "gpu_read")
+_GPU_SRC = os.path.join(_HERE, "gpu_read.c")
+
+
+def _ensure_built(binp, srcp, name):
+    """Ikili yoksa ama kaynak varsa clang ile derle (elle derleme gerekmesin)."""
+    if os.path.isfile(binp) and os.access(binp, os.X_OK):
+        return True
+    if not os.path.isfile(srcp):
+        return False
+    try:
+        print(f"[sysmon_mac] {name} derleniyor (ilk calistirma)...")
+        r = subprocess.run(
+            ["clang", "-O2", "-o", binp, srcp,
+             "-framework", "IOKit", "-framework", "CoreFoundation"],
+            capture_output=True, text=True, timeout=60)
+        if r.returncode == 0 and os.path.isfile(binp):
+            os.chmod(binp, 0o755)
+            print(f"[sysmon_mac] {name} derlendi.")
+            return True
+        else:
+            print(f"[sysmon_mac] {name} derleme basarisiz: {r.stderr[:200]}")
+    except FileNotFoundError:
+        print("[sysmon_mac] clang yok (xcode-select --install gerekli)")
+    except Exception as e:
+        print(f"[sysmon_mac] {name} derleme hatasi: {e}")
+    return False
 
 # Okunacak SMC anahtarlari (bu donanimda gecerli olanlar)
 _SMC_KEYS = [
@@ -58,8 +86,30 @@ def _read_smc():
     return result
 
 
+def _read_gpu():
+    """gpu_read ile GPU istatistiklerini oku -> {label: float}."""
+    result = {}
+    if not os.path.isfile(_GPU_BIN):
+        return result
+    try:
+        out = subprocess.run([_GPU_BIN], capture_output=True, text=True, timeout=4)
+        for line in out.stdout.splitlines():
+            line = line.strip()
+            if "=" in line:
+                k, v = line.split("=", 1)
+                try:
+                    result[k.strip()] = float(v.strip())
+                except ValueError:
+                    pass
+    except Exception:
+        pass
+    return result
+
+
 class SysMonitor:
     def __init__(self, interval=1.5):
+        _ensure_built(_SMC_BIN, _SMC_SRC, "smc_read")   # SMC okuyucu
+        _ensure_built(_GPU_BIN, _GPU_SRC, "gpu_read")   # GPU okuyucu
         self._interval = interval
         self._data = {}
         self._lock = threading.Lock()
@@ -124,8 +174,26 @@ class SysMonitor:
                 d["net_down"] = nd
                 d["net_up"] = nu
 
-            # GPU (RX 6900 XT): SMC'de yok -> None. Ileride IOKit ile eklenebilir.
-            # gpu_junction, gpu_edge, gpu_mem, gpu_usage, gpu_power, gpu_vram_* None kalir.
+            # --- GPU (RX 6900 XT): IOKit PerformanceStatistics ---
+            g = _read_gpu()
+            if g:
+                d["gpu_junction"] = g.get("temp")        # GPU sicaklik
+                d["gpu_edge"] = g.get("temp")            # (tek sicaklik var)
+                d["gpu_power"] = g.get("power")          # GPU guc (W)
+                # kullanim: once "util", yoksa "util2" (GPU Activity)
+                gu = g.get("util")
+                if not gu:
+                    gu = g.get("util2")
+                d["gpu_usage"] = gu
+                # VRAM: vidused (kullanilan MB) + free -> toplam
+                used = g.get("vidused") or g.get("vramused")
+                free = g.get("vramfree")
+                if used is not None:
+                    d["gpu_vram_used"] = used / 1024.0   # MB -> GB
+                if used is not None and free is not None:
+                    d["gpu_vram_total"] = (used + free) / 1024.0  # GB
+                # GPU fan (varsa)
+                d["gpu_fan_rpm"] = int(g["fan"]) if g.get("fan") else None
 
             with self._lock:
                 self._data = d

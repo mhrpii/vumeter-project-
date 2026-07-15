@@ -27,3 +27,4 @@ smc_read
 cavatest_mac.py
 native_proto_mac_DEBUG.py
 smc_read
+gpu_read
