@@ -24,3 +24,6 @@ sendtest2.py
 fpsprofil*.py
 api.json
 smc_read
+cavatest_mac.py
+native_proto_mac_DEBUG.py
+smc_read
