@@ -24,6 +24,8 @@ _SMC_BIN = os.path.join(_HERE, "smc_read")
 _SMC_SRC = os.path.join(_HERE, "smc_read.c")
 _GPU_BIN = os.path.join(_HERE, "gpu_read")
 _GPU_SRC = os.path.join(_HERE, "gpu_read.c")
+_DISK_BIN = os.path.join(_HERE, "disk_read")
+_DISK_SRC = os.path.join(_HERE, "disk_read.c")
 
 
 def _ensure_built(binp, srcp, name):
@@ -106,10 +108,34 @@ def _read_gpu():
     return result
 
 
+def _read_disks():
+    """disk_read ile tum disklerin sicakligini oku -> [(model, temp, tip), ...]."""
+    disks = []
+    if not os.path.isfile(_DISK_BIN):
+        return disks
+    try:
+        out = subprocess.run([_DISK_BIN], capture_output=True, text=True, timeout=6)
+        for line in out.stdout.splitlines():
+            line = line.strip()
+            parts = line.split("|")
+            if len(parts) == 3:
+                model, temp, typ = parts
+                try:
+                    disks.append((model, int(temp), typ))
+                except ValueError:
+                    pass
+    except Exception:
+        pass
+    return disks
+
+
 class SysMonitor:
     def __init__(self, interval=1.5):
-        _ensure_built(_SMC_BIN, _SMC_SRC, "smc_read")   # SMC okuyucu
-        _ensure_built(_GPU_BIN, _GPU_SRC, "gpu_read")   # GPU okuyucu
+        _ensure_built(_SMC_BIN, _SMC_SRC, "smc_read")     # SMC okuyucu
+        _ensure_built(_GPU_BIN, _GPU_SRC, "gpu_read")     # GPU okuyucu
+        _ensure_built(_DISK_BIN, _DISK_SRC, "disk_read")  # disk sicaklik okuyucu
+        self._disks = []
+        self._disk_last = 0.0
         self._interval = interval
         self._data = {}
         self._lock = threading.Lock()
@@ -194,6 +220,13 @@ class SysMonitor:
                     d["gpu_vram_total"] = (used + free) / 1024.0  # GB
                 # GPU fan (varsa)
                 d["gpu_fan_rpm"] = int(g["fan"]) if g.get("fan") else None
+
+            # diskler yavas isinir -> 10 sn'de bir oku (disk_read ~1sn surer)
+            now = time.time()
+            if now - self._disk_last > 10.0:
+                self._disks = _read_disks()
+                self._disk_last = now
+            d["disks"] = self._disks
 
             with self._lock:
                 self._data = d

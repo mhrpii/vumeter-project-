@@ -333,8 +333,118 @@ def _sm_font(size, bold=True):
     return _sm_font_cache[key]
 
 
+def _arc_dots_m(surf, cx, cy, radius, deg_start, deg_end, width, color_fn):
+    """Yayi sik dolu dairelerle ciz (modul seviyesi, surf parametreli)."""
+    if deg_end <= deg_start:
+        return
+    r = max(2, width // 2)
+    arc_len = math.radians(deg_end - deg_start) * radius
+    steps = max(3, int(arc_len / max(1, r * 0.55)))
+    for i in range(steps + 1):
+        f = i / steps
+        deg = deg_start + (deg_end - deg_start) * f
+        a = math.radians(deg)
+        x = cx + radius * math.cos(a)
+        y = cy + radius * math.sin(a)
+        col = color_fn((deg - 150) / 240.0)
+        pygame.draw.circle(surf, col, (int(x), int(y)), r)
+
+
+def draw_card_gauge_m(surf, cx, cy, radius, frac, base_color=None):
+    """Dairesel ilerleme halkasi (modul seviyesi). Gradient, puruzsuz."""
+    frac = max(0.0, min(1.0, frac))
+    _arc_dots_m(surf, cx, cy, radius, 150, 390, 11, lambda t: (36, 45, 58))
+    if frac <= 0.005:
+        return
+    end_deg = 150 + 240 * frac
+    _arc_dots_m(surf, cx, cy, radius, 150, end_deg, 11, _sm_grad_rgb)
+
+
+def _short_disk_name(model):
+    """Uzun disk modelini kisa okunakli isme cevir."""
+    m = model.strip()
+    # bilinen markalar -> kisa ad
+    mapping = [
+        ("WD_BLACK SN850X", "WD_BLACK SN850X"),
+        ("Samsung SSD 9100 PRO", "Samsung 9100 PRO"),
+        ("ADATA SX8200PNP", "ADATA SX8200PNP"),
+        ("KIOXIA-EXCERIA PLUS G4", "KIOXIA EXCERIA G4"),
+        ("WDS500G3X0C", "WD Blue SN570"),
+        ("MTFDDAK256TBN", "Micron 5400 256G"),
+        ("ST4000DM004", "Seagate BarraCuda 4TB"),
+        ("ST1000LM048", "Seagate BarraCuda 1TB"),
+        ("ST500LT012", "Seagate 500GB"),
+    ]
+    for pat, short in mapping:
+        if m.startswith(pat) or pat in m:
+            return short
+    return m[:20]
+
+
+def draw_sysmon_disks(surf, disks):
+    """SAYFA 2: 9 diskin sicakliklari (ust: NVMe, alt: SATA)."""
+    surf.fill((8, 10, 8))
+
+    def temp_color(t):
+        if t is None: return (60, 66, 60)
+        if t < 50: return (60, 230, 90)
+        if t < 65: return (245, 210, 60)
+        return (235, 60, 40)
+
+    # baslik SAG UST (hava sol ustte, cakismaz)
+    tf = _sm_font(22)
+    ts = tf.render("DİSK ISISI", True, (150, 165, 180))
+    surf.blit(ts, (WIDTH - ts.get_width() - 18, 10))
+
+    nvme = [x for x in disks if x[2] == "nvme"]
+    sata = [x for x in disks if x[2] == "sata"]
+
+    def draw_disk_row(items, row_top, row_h, tag):
+        if not items:
+            return
+        margin = 16
+        gap = 8
+        n = max(len(items), 1)
+        card_w = (WIDTH - 2*margin - (n-1)*gap) // n
+        for idx, (model, temp, typ) in enumerate(items):
+            cx0 = margin + idx * (card_w + gap)
+            ccx = cx0 + card_w // 2
+            col = temp_color(temp)
+            frac = max(0.0, min(1.0, temp / 90.0))
+            # kart
+            pygame.draw.rect(surf, (22, 27, 34), (cx0, row_top, card_w, row_h), border_radius=12)
+            pygame.draw.rect(surf, (35, 43, 54), (cx0, row_top, card_w, row_h), 1, border_radius=12)
+            # gauge halka
+            gcx = ccx; gcy = row_top + int(row_h * 0.40)
+            gr = int(min(card_w, row_h) * 0.42)
+            gcol = _sm_grad_rgb(frac)
+            draw_card_gauge_m(surf, gcx, gcy, gr, frac, gcol)
+            # sicaklik rakami
+            vf = _sm_font(int(gr * 0.9))
+            vs = vf.render(f"{temp}", True, gcol)
+            surf.blit(vs, (gcx - vs.get_width()//2, gcy - vs.get_height()//2))
+            # C birimi
+            uf = _sm_font(14)
+            us = uf.render("C", True, (170, 182, 196))
+            surf.blit(us, (ccx - us.get_width()//2, row_top + int(row_h*0.66)))
+            # disk adi - kisa ve okunakli isim
+            name = _short_disk_name(model)
+            # karta sigacak en buyuk fontu bul (18'den asagi)
+            nsize = 24
+            nf = _sm_font(nsize)
+            while nf.size(name)[0] > card_w - 8 and nsize > 12:
+                nsize -= 1
+                nf = _sm_font(nsize)
+            ns = nf.render(name, True, (225, 232, 242))
+            surf.blit(ns, (ccx - ns.get_width()//2, row_top + int(row_h*0.80)))
+
+    half = HEIGHT // 2
+    draw_disk_row(nvme, 34, half - 40, "nvme")
+    draw_disk_row(sata, half + 6, half - 40, "sata")
+
+
 def draw_sysmon(surf, fps):
-    """NATIVE yatay sistem monitoru (Mac tarzi: dikey cubuklar yan yana)."""
+    """NATIVE yatay sistem monitoru. 2 sayfa: 0=sensorler, 1=disk sicakliklari."""
     surf.fill((8, 10, 8))
     mon = _get_sysmon()
     if mon is None:
@@ -342,6 +452,10 @@ def draw_sysmon(surf, fps):
         surf.blit(f.render("Sensor okunamadi", True, (200, 80, 80)), (60, HEIGHT//2 - 20))
         return
     d = mon.snapshot()
+    # SAYFA 1: disk sicakliklari
+    if _state.get("sysmon_page", 0) == 1:
+        draw_sysmon_disks(surf, d.get("disks") or [])
+        return
     GREEN = (60, 230, 90); DARK = (20, 24, 20); GREY = (60, 66, 60)
     WHITE = (80, 220, 215); DIM = (90, 175, 175)
 
@@ -407,36 +521,6 @@ def draw_sysmon(surf, fps):
     margin = 16
     vfont = _sm_font(30); ufont = _sm_font(15); lfont = _sm_font(17)
 
-    def _arc_dots(cx, cy, radius, deg_start, deg_end, width, color_fn):
-        """Yayi SIK DOLU DAIRELERLE ciz -> kenarlar puruzsuz/yuvarlak (tirtik yok).
-        color_fn(t) -> o konumun rengi (t: 0..1 yay boyunca)."""
-        if deg_end <= deg_start:
-            return
-        r = max(2, width // 2)
-        # adim: daire caplari ust uste binsin (puruzsuz)
-        arc_len = math.radians(deg_end - deg_start) * radius
-        steps = max(3, int(arc_len / max(1, r * 0.55)))
-        for i in range(steps + 1):
-            f = i / steps
-            deg = deg_start + (deg_end - deg_start) * f
-            a = math.radians(deg)
-            x = cx + radius * math.cos(a)
-            y = cy + radius * math.sin(a)
-            col = color_fn((deg - 150) / 240.0)
-            pygame.draw.circle(surf, col, (int(x), int(y)), r)
-
-    def draw_card_gauge(cx, cy, radius, frac, base_color):
-        """Dairesel ilerleme halkasi (240 derece, alttan acik).
-        Halka BOYUNCA gradient (yesil->sari->kirmizi), kenarlar puruzsuz."""
-        frac = max(0.0, min(1.0, frac))
-        # arka halka (bos, koyu) - tek renk
-        _arc_dots(cx, cy, radius, 150, 390, 11, lambda t: (36, 45, 58))
-        if frac <= 0.005:
-            return
-        # dolu kisim: konuma gore gradient renk
-        end_deg = 150 + 240 * frac
-        _arc_dots(cx, cy, radius, 150, end_deg, 11, _sm_grad_rgb)
-
     def draw_row(bars, row_top, row_bottom):
         n = len(bars)
         gap = 8
@@ -470,7 +554,7 @@ def draw_sysmon(surf, fps):
             # DAIRESEL HALKA (frac kadar dolu, yumusak renk)
             gauge_cy = card_top + int(card_h * 0.44)
             gauge_r = int(min(card_w, card_h) * 0.47)   # YAY genis + kalin
-            draw_card_gauge(ccx, gauge_cy, gauge_r, frac, gcol)
+            draw_card_gauge_m(surf, ccx, gauge_cy, gauge_r, frac, gcol)
             # rakam - TUM kartlarda AYNI boyut (en uzun "3267"e gore sabit)
             vs = _gauge_vfont.render(vtxt, True, gcol)
             surf.blit(vs, (ccx - vs.get_width()//2, gauge_cy - vs.get_height()//2))
@@ -1015,10 +1099,18 @@ def build_tray():
         a = QAction(pn, menu, checkable=True); a.setChecked(_state.get("meter_page",0)==i)
         a.triggered.connect(mk_page(i)); pg_group.addAction(a); olcp.addAction(a)
 
-    # Sistem Monitoru
-    smon = QAction("Sistem Monitoru", menu)
-    smon.triggered.connect(lambda: _state.__setitem__("mode", "Sistem Monitoru"))
-    menu.addAction(smon)
+    # Sistem Monitoru (2 sayfa: Sensorler / Diskler)
+    smon_menu = menu.addMenu("Sistem Monitoru")
+    def mk_sysmon_page(p):
+        def _f():
+            _state["mode"] = "Sistem Monitoru"
+            _state["sysmon_page"] = p
+        return _f
+    sp_group = QActionGroup(menu); sp_group.setExclusive(True)
+    for pi, pn in [(0, "Sensorler"), (1, "Disk Sicakliklari")]:
+        a = QAction(pn, menu, checkable=True)
+        a.setChecked(_state.get("mode")=="Sistem Monitoru" and _state.get("sysmon_page",0)==pi)
+        a.triggered.connect(mk_sysmon_page(pi)); sp_group.addAction(a); smon_menu.addAction(a)
     menu.addSeparator()
 
     # Parlaklik (API'ye baglanir)

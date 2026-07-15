@@ -28,3 +28,6 @@ cavatest_mac.py
 native_proto_mac_DEBUG.py
 smc_read
 gpu_read
+disk_read
+disk_read_dbg
+guts_test
