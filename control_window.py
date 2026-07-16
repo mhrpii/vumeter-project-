@@ -191,6 +191,11 @@ def build_control_window(state, color_themes, led_themes, vu_dial_count,
     quit_btn = QPushButton("Çıkış"); quit_btn.setObjectName("quit")
     def do_quit():
         state["running"] = False
+        try:
+            from PyQt5.QtWidgets import QApplication
+            QApplication.quit()
+        except Exception:
+            pass
     quit_btn.clicked.connect(do_quit)
     root.addWidget(quit_btn)
 

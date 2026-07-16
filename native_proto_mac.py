@@ -1302,7 +1302,17 @@ def build_tray():
 
     menu.addSeparator()
     qa = QAction("Çıkış", menu)
-    def do_quit(): _state["running"] = False
+    def do_quit():
+        _state["running"] = False
+        try:
+            tray.hide()
+        except Exception:
+            pass
+        try:
+            from PyQt5.QtWidgets import QApplication as _QA
+            _QA.quit()
+        except Exception:
+            pass
     qa.triggered.connect(do_quit); menu.addAction(qa)
 
     # KONTROL PENCERESI - tray'e tiklaninca acilir
@@ -1423,8 +1433,10 @@ def main():
     send_proc.start()
 
     print(f"Baslatildi. Native {WIDTH}x{HEIGHT}, {FPS} FPS, Spektrum. Ctrl+C ile cik.")
-    frames = 0; t0 = time.time()
-    try:
+
+    def render_loop():
+        """LCD render dongusu - AYRI THREAD (Qt menusu acilinca donmasin diye)."""
+        frames = 0; t0 = time.time()
         while _state["running"]:
             frame_start = time.time()
             snap = cava.snapshot()
@@ -1456,9 +1468,6 @@ def main():
             frame_counter.value = frames
             frames += 1
 
-            # tray olaylarini isle
-            if qt_app is not None:
-                qt_app.processEvents()
             # parlaklik degistiyse sender'a bildir (yazilimsal karartma)
             if _state.get("brightness_changed"):
                 _state["brightness_changed"] = False
@@ -1476,16 +1485,27 @@ def main():
             if frames % 60 == 0:
                 fps_now = frames / (time.time() - t0)
                 sys.stderr.write(f"\r{frames} kare, {fps_now:.1f} FPS  ")
+
+    # Render thread'i baslat (LCD surekli guncellensin)
+    render_thread = threading.Thread(target=render_loop, daemon=True)
+    render_thread.start()
+
+    try:
+        if qt_app is not None:
+            qt_app.exec_()          # Qt olay dongusu ANA THREAD'de (menu donmaz)
+        else:
+            while _state["running"]:
+                time.sleep(0.2)     # tray yoksa bekle
     except KeyboardInterrupt:
         print("\nCikiliyor...")
+        _state["running"] = False
     finally:
         _state["running"] = False
         # Cikista paneli TEMIZLE: siyah kareyi shared memory'ye yaz, sender USB'ye gonderir
         try:
             black = pygame.Surface((WIDTH, HEIGHT)); black.fill((0, 0, 0))
             shm.buf[:WIDTH*HEIGHT*3] = pygame.image.tostring(black, "RGB")
-            frames += 1
-            frame_counter.value = frames
+            frame_counter.value = frame_counter.value + 1
             time.sleep(0.35)          # sender siyah kareyi yollasin
         except Exception:
             pass
@@ -1500,7 +1520,14 @@ def main():
             cava.proc.terminate()
         except Exception:
             pass
+        # sender process'i de durdur
+        try:
+            send_proc.terminate()
+        except Exception:
+            pass
         print("Temiz kapandi.")
+        # process'i KESIN sonlandir (render/hava thread'leri, tray kalmasin)
+        os._exit(0)
 
 
 if __name__ == "__main__":
