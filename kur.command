@@ -31,15 +31,46 @@ fi
 # --- 2) cava + libusb ---
 echo ""
 echo "[*] cava + libusb kuruluyor..."
-if command -v cava >/dev/null 2>&1; then
-    echo "[OK] cava zaten kurulu ($(command -v cava))."
-elif command -v brew >/dev/null 2>&1; then
-    if ! brew install cava 2>/dev/null; then
-        echo "[!] cava brew ile kurulamadi (muhtemelen eski macOS + gcc derleme sorunu)."
-        echo "    ELLE KURULUM: README'deki 'macOS 12 elle kurulum' bolumunu izle:"
-        echo "    - Calisan bir Mac'ten cava binary + dylib'leri kopyala, ya da"
-        echo "    - GitHub'dan cava'yi clang ile derle."
+ARCH="$(uname -m)"
+install_cava_from_deps() {
+    # mac_deps/ icindeki hazir cava + dylib'leri yerine koy (Intel Mac icin)
+    if [ ! -d "mac_deps" ] || [ ! -f "mac_deps/cava" ]; then
+        return 1
     fi
+    if [ "$ARCH" != "x86_64" ]; then
+        echo "    [!] mac_deps Intel (x86_64) icin; bu makine $ARCH — kullanilamaz."
+        return 1
+    fi
+    echo "    [*] mac_deps/ icinden hazir cava + kutuphaneler kuruluyor..."
+    # dylib hedef klasorleri
+    mkdir -p /usr/local/opt/portaudio/lib /usr/local/opt/fftw/lib /usr/local/opt/iniparser/lib 2>/dev/null
+    cp mac_deps/libportaudio.2.dylib  /usr/local/opt/portaudio/lib/ 2>/dev/null
+    cp mac_deps/libfftw3.3.dylib      /usr/local/opt/fftw/lib/      2>/dev/null
+    cp mac_deps/libiniparser.4.dylib  /usr/local/opt/iniparser/lib/ 2>/dev/null
+    # dylib'leri /usr/local/lib'e de koy (yedek arama yolu)
+    cp mac_deps/*.dylib /usr/local/lib/ 2>/dev/null
+    # cava binary
+    cp mac_deps/cava /usr/local/bin/cava 2>/dev/null
+    chmod +x /usr/local/bin/cava 2>/dev/null
+    if /usr/local/bin/cava -v >/dev/null 2>&1; then
+        echo "    [OK] cava mac_deps'ten kuruldu ($(cava -v 2>/dev/null | head -1))."
+        return 0
+    fi
+    return 1
+}
+
+if command -v cava >/dev/null 2>&1 && cava -v >/dev/null 2>&1; then
+    echo "[OK] cava zaten kurulu ($(command -v cava))."
+elif install_cava_from_deps; then
+    :   # mac_deps'ten kuruldu
+elif command -v brew >/dev/null 2>&1; then
+    echo "[*] cava brew ile deneniyor..."
+    if ! brew install cava 2>/dev/null; then
+        echo "[!] cava brew ile kurulamadi (eski macOS + gcc derleme sorunu olabilir)."
+        echo "    mac_deps/ klasoru yoksa: README 'macOS 12 elle kurulum' bolumunu izle."
+    fi
+else
+    echo "[!] cava kurulamadi (Homebrew yok, mac_deps yok)."
 fi
 command -v brew >/dev/null 2>&1 && { brew list libusb >/dev/null 2>&1 || brew install libusb 2>/dev/null; }
 
