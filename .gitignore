@@ -42,3 +42,6 @@ guts_test
 ipg_read
 gpu_read_all
 gpu_read_all.c
+launcher_bin
+VU Meter LCD.app.icns
+*.app.icns
