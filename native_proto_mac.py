@@ -1496,7 +1496,6 @@ def main():
             _dbg_frame[0] += 1
             if snap and _dbg_frame[0] % 30 == 0:
                 import sys as _sd
-                _sd.stderr.write("[DBG] max=" + str(max(snap)) + " ort=" + str(sum(snap)//len(snap)) + chr(10))
                 _sd.stderr.flush()
             mode = _state["mode"]
             # IDLE: uzun sure ses yoksa bekleme ekrani (siyah kalmasin)
