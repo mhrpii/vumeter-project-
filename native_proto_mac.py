@@ -936,14 +936,14 @@ def _find_cava_bin():
     return "cava"
 
 
-def write_cava_config(bars=NUM_BARS, fps=60):
-    """Mac: portaudio + sabit Scarlett kaynagi."""
+def write_cava_config(bars=NUM_BARS, fps=60, autosens=0):
+    """Mac: portaudio + sabit Scarlett kaynagi. autosens dinamik (idle'da 0, muzikte 1)."""
     os.makedirs(os.path.dirname(CAVA_CONFIG), exist_ok=True)
     with open(CAVA_CONFIG, "w") as f:
         f.write(f"""[general]
 bars = {bars}
 framerate = {fps}
-autosens = 0
+autosens = {autosens}
 sensitivity = 100
 
 [input]
@@ -983,6 +983,8 @@ class CavaReader:
         self.proc = None
         self._active_source = None
         self._zero_since = None
+        self._cur_autosens = 1   # baslangicta autosens acik (muzik bekleniyor)
+        self._warmup = 0   # restart sonrasi yumusak baslangic sayaci
         self._last_data = time.time()
         self._pw_reset_done = False
         self._t = threading.Thread(target=self._loop, daemon=True)
@@ -991,10 +993,25 @@ class CavaReader:
     def _start(self):
         _wait_for_source()
         self._active_source = _find_scarlett_monitor()
-        write_cava_config()
+        write_cava_config(autosens=self._cur_autosens)
         self.proc = subprocess.Popen([_find_cava_bin(), "-p", CAVA_CONFIG], stdout=subprocess.PIPE,
                                      stderr=subprocess.DEVNULL, text=True, bufsize=1)
         self._zero_since = None
+        self._warmup = 22   # ilk 12 kare 0 (kalibrasyon gizli) + 10 kare kademeli (hizli otur)
+
+    def set_autosens(self, val):
+        """Idle'da 0 (gurultu sismesin), muzikte 1 (otomatik seviye).
+        Sadece degistiginde cava'yi yeniden baslatir."""
+        val = 1 if val else 0
+        if val == self._cur_autosens:
+            return
+        self._cur_autosens = val
+        # config'i yeni autosens ile yaz + cava restart
+        try:
+            write_cava_config(autosens=val)
+        except Exception:
+            pass
+        self._restart_cava()
 
     def _restart_cava(self):
         try:
@@ -1071,6 +1088,16 @@ class CavaReader:
     def snapshot(self):
         with self._lock:
             raw = list(self.bars)
+        # restart sonrasi YUMUSAK BASLANGIC:
+        # ilk 20 kare TAM 0 (autosens kalibrasyon sicramasi tamamen gizli),
+        # sonraki 15 kare kademeli 0->1 (yumusak devreye gir).
+        if self._warmup > 0:
+            self._warmup -= 1
+            if self._warmup > 10:
+                raw = [0] * len(raw)              # kalibrasyon fazi: tam sessiz (12 kare)
+            else:
+                wf = (10 - self._warmup) / 10.0   # kademeli 0.0 -> 1.0 (10 kare)
+                raw = [int(v * wf) for v in raw]
         # canli hassasiyet carpani (menudeki slider) + 0-255 clamp
         m = _state.get("sens_mult", 1.0)
         if m != 1.0:
@@ -1430,6 +1457,9 @@ def build_tray():
 def main():
     # Kayitli ayarlari yukle (hassasiyet, kanal, tema, parlaklik, mod...)
     load_settings()
+    # Acilista "yeni ses vardi" say -> idle/autosens=0 hemen tetiklenmesin,
+    # cava veri uretene kadar autosens=1 kalsin (ilk acilista restart olmasin).
+    _state["last_sound"] = time.time()
     # argv: mod adi ve/veya --autostart / --no-tray bayraklari
     args = sys.argv[1:]
     autostart = "--autostart" in args
@@ -1502,6 +1532,14 @@ def main():
             if snap and max(snap) > 2:
                 _state["last_sound"] = time.time()
             idle = (time.time() - _state.get("last_sound", 0)) > 8.0
+            # AUTOSENS dinamik: kisa sessizliklerde (sarki arasi) ACIK kalir ki
+            # muzik gelince ANINDA bar gelsin (restart yok). Sadece UZUN sessizlikte
+            # (30s+, gurultu 38s'de sismeden once) kapanir -> Scarlett self-noise sismez.
+            silence = time.time() - _state.get("last_sound", 0)
+            try:
+                cava.set_autosens(0 if silence > 30.0 else 1)
+            except Exception:
+                pass
             # Sistem Monitoru sesten BAGIMSIZ - idle'a dusmez, her zaman gosterilir
             if mode == "Sistem Monitoru":
                 draw_sysmon(surf, FPS)
