@@ -8,7 +8,7 @@ import os
 
 def build_control_window(state, color_themes, led_themes, vu_dial_count,
                          on_brightness, led_cache_clear, vu_cache_clear):
-    from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
+    from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QCheckBox,
                                  QLabel, QSlider, QFrame, QButtonGroup, QGridLayout)
     from PyQt5.QtCore import Qt
 
@@ -241,6 +241,52 @@ def build_control_window(state, color_themes, led_themes, vu_dial_count,
     root.addLayout(ch_grid)
 
     sep3 = QFrame(); sep3.setObjectName("sep"); sep3.setFrameShape(QFrame.HLine); root.addWidget(sep3)
+
+    # --- Otomatik Baslat (LaunchAgent) ---
+    import os as _os
+    _LA_PLIST = _os.path.expanduser("~/Library/LaunchAgents/com.vumeter.lcd.plist")
+    def _autostart_aktif():
+        return _os.path.exists(_LA_PLIST)
+    def _autostart_ac():
+        app = "/Applications/VU Meter LCD.app"
+        la_dir = _os.path.expanduser("~/Library/LaunchAgents")
+        _os.makedirs(la_dir, exist_ok=True)
+        plist = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>com.vumeter.lcd</string>
+    <key>ProgramArguments</key>
+    <array><string>{app}/Contents/MacOS/launcher</string></array>
+    <key>RunAtLoad</key><true/>
+    <key>KeepAlive</key><false/>
+</dict>
+</plist>
+"""
+        try:
+            with open(_LA_PLIST, "w") as f:
+                f.write(plist)
+            _os.system(f'launchctl unload "{_LA_PLIST}" 2>/dev/null')
+            _os.system(f'launchctl load "{_LA_PLIST}" 2>/dev/null')
+        except Exception:
+            pass
+    def _autostart_kapat():
+        try:
+            _os.system(f'launchctl unload "{_LA_PLIST}" 2>/dev/null')
+            if _os.path.exists(_LA_PLIST):
+                _os.remove(_LA_PLIST)
+        except Exception:
+            pass
+
+    auto_cb = QCheckBox("Mac açılınca otomatik başlat")
+    auto_cb.setChecked(_autostart_aktif())
+    def _on_auto(state):
+        if state:
+            _autostart_ac()
+        else:
+            _autostart_kapat()
+    auto_cb.toggled.connect(_on_auto)
+    root.addWidget(auto_cb)
 
     # --- Cikis ---
     quit_btn = QPushButton("Çıkış"); quit_btn.setObjectName("quit")

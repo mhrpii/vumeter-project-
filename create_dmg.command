@@ -32,7 +32,7 @@ for f in smc_read.c gpu_read.c disk_read.c ipg_read.c; do
 done
 
 # Kurulum + dokuman + ikon
-for f in kur.command README_MAC.md app_icon_1024.png autostart_ac.command autostart_kapat.command; do
+for f in kur.command README_MAC.md app_icon_1024.png; do
     [ -f "$f" ] && cp "$f" "$STAGING/" && echo "    + $f"
 done
 
