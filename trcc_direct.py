@@ -99,19 +99,6 @@ class TrccDirect:
             raise RuntimeError(f"Panel bulunamadi ({VID:04X}:{PID:04X}). "
                                "Takili mi? Yonetici misin?")
 
-        # USB RESET: uyku/reboot/kilit sonrasi cihaz asili kalabilir (Errno 110).
-        # dev.reset() "USB takip cikarma"nin yazilimsal hali - kilidi temizler.
-        try:
-            self.dev.reset()
-            time.sleep(1.0)   # reset sonrasi cihaz yeniden sayilsin
-            # reset sonrasi handle gecersiz olur -> cihazi tekrar bul
-            self.dev = usb.core.find(idVendor=VID, idProduct=PID, backend=backend)
-            if self.dev is None:
-                time.sleep(1.5)   # biraz daha bekle, USB yeniden gelsin
-                self.dev = usb.core.find(idVendor=VID, idProduct=PID, backend=backend)
-        except Exception:
-            pass   # reset desteklenmezse/basarisizsa normal akisa devam
-
         # kernel surucusunu ayir (Linux; Windows'ta NotImplementedError -> gecilir)
         for i in range(4):
             try:
@@ -127,7 +114,36 @@ class TrccDirect:
         except usb.core.USBError:
             self.dev.set_configuration(USB_CONFIG)
 
-        usb.util.claim_interface(self.dev, USB_IFACE)
+        # AKILLI RESET: normal claim'i dene (hizli). Kilit varsa (uyku/reboot sonrasi
+        # Errno 110) -> dev.reset() ile temizle + tekrar dene. Normal acilista reset YOK.
+        try:
+            usb.util.claim_interface(self.dev, USB_IFACE)
+        except usb.core.USBError:
+            # kilit tespit edildi -> USB reset ("takip cikarma"nin yazilimsal hali)
+            try:
+                self.dev.reset()
+                time.sleep(1.2)   # cihaz yeniden sayilsin
+            except Exception:
+                pass
+            # reset sonrasi handle gecersiz -> cihazi tekrar bul + yeniden kur
+            self.dev = usb.core.find(idVendor=VID, idProduct=PID, backend=backend)
+            if self.dev is None:
+                time.sleep(1.5)
+                self.dev = usb.core.find(idVendor=VID, idProduct=PID, backend=backend)
+            if self.dev is None:
+                raise RuntimeError("Panel reset sonrasi bulunamadi.")
+            # kernel driver + config tekrar
+            for i in range(4):
+                try:
+                    if self.dev.is_kernel_driver_active(i):
+                        self.dev.detach_kernel_driver(i)
+                except (usb.core.USBError, NotImplementedError):
+                    pass
+            try:
+                self.dev.set_configuration(USB_CONFIG)
+            except usb.core.USBError:
+                pass
+            usb.util.claim_interface(self.dev, USB_IFACE)   # tekrar dene
         self._open = True
 
         # --- ENDPOINT'leri CIHAZDAN oku (sabit degil! trcc de boyle yapiyor) ---
