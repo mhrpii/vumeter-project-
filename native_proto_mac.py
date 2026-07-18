@@ -1585,6 +1585,29 @@ def main():
     render_thread = threading.Thread(target=render_loop, daemon=True)
     render_thread.start()
 
+    # Ctrl+C (SIGINT): Qt exec_ C++ dongusunde Python signal'lari islenmez.
+    # Cozum: bir QTimer her 200ms Python'a kontrol verir -> bekleyen SIGINT islenir.
+    import signal as _signal
+    def _sigint_handler(sig, frame):
+        try:
+            send_proc.kill()
+        except Exception:
+            pass
+        try:
+            os.system("pkill -f 'cava -p' 2>/dev/null")
+        except Exception:
+            pass
+        os._exit(0)
+    try:
+        _signal.signal(_signal.SIGINT, _sigint_handler)
+        # QTimer: Qt exec_ icindeyken periyodik olarak Python'a don (signal islensin)
+        from PyQt5.QtCore import QTimer as _QTimer
+        _sigint_timer = _QTimer()
+        _sigint_timer.start(200)          # her 200ms
+        _sigint_timer.timeout.connect(lambda: None)   # Python'a kontrol ver (signal islensin)
+    except Exception:
+        pass
+
     try:
         if qt_app is not None:
             qt_app.exec_()          # Qt olay dongusu ANA THREAD'de (menu donmaz)
