@@ -1254,14 +1254,29 @@ def sender_process_main(shm_name, frame_counter, w, h, brightness=None):
     pg.display.init()
 
     from trcc_direct import TrccDirect
-    dev = TrccDirect()
-    try:
-        dev.connect()
-    except Exception as e:
-        print(f"[sender] PANEL BAGLANTI HATASI: {e}")
-        print("[sender] baska bir surec USB'yi tutuyor olabilir ya da panel takili degil.")
-        print("[sender] Cozum: tum kopyalari kapat (pkill -f native_proto), USB'yi cikar-tak.")
-        return
+
+    def _baglan_donene_kadar():
+        """Basarana kadar baglanmayi dene (akilli reset connect icinde).
+        Uyku/kilit sonrasi USB'nin kendine gelmesini bekler."""
+        deneme = 0
+        while True:
+            d = TrccDirect()
+            try:
+                d.connect()
+                if deneme > 0:
+                    print(f"[sender] panel geri geldi (deneme {deneme+1}).")
+                return d
+            except Exception as e:
+                deneme += 1
+                if deneme <= 3 or deneme % 12 == 0:
+                    print(f"[sender] baglanti bekleniyor ({deneme}): {type(e).__name__}: {e}")
+                try:
+                    d.close()
+                except Exception:
+                    pass
+                time.sleep(5.0)
+
+    dev = _baglan_donene_kadar()
 
     shm = shared_memory.SharedMemory(name=shm_name)
     print("[sender] dogrudan USB akisi basladi.")
@@ -1295,10 +1310,20 @@ def sender_process_main(shm_name, frame_counter, w, h, brightness=None):
                         print(f"[sender] panele giden: {win_sent/(now-win_t0):.1f} FPS")
                         win_t0 = now
                         win_sent = 0
+                    errs = 0   # basarili gonderim: hata sayacini sifirla
                 except Exception as e:
                     errs += 1
                     if errs <= 3 or errs % 50 == 0:
                         print(f"[sender] HATA #{errs}: {type(e).__name__}: {e}")
+                    if errs >= 5:
+                        # USB olmus olabilir (uyku sonrasi tipik). Yeniden kur:
+                        print("[sender] USB toparlaniyor: kapat + akilli reset ile yeniden baglan...")
+                        try:
+                            dev.close()
+                        except Exception:
+                            pass
+                        dev = _baglan_donene_kadar()
+                        errs = 0
                     time.sleep(0.05)
             else:
                 time.sleep(0.002)
