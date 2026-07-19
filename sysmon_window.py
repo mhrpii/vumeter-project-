@@ -4,6 +4,7 @@ gercek donanim verisi okur."""
 import os
 import sys
 import pygame
+import math
 from collections import deque as _deque
 
 # Platforma gore sensor kaynagi:
@@ -88,7 +89,240 @@ _CARD_DESC = {
 }
 
 
+def _sm_grad_rgb(t):
+    """0..1 -> yesil->sari->kirmizi gecis (grafik icin)."""
+    t = max(0.0, min(1.0, t))
+    if t < 0.5:
+        f = t / 0.5
+        return (int(58 + (242-58)*f), int(212 - (212-201)*f), int(110 - (110-76)*f))
+    else:
+        f = (t - 0.5) / 0.5
+        return (int(242 + (235-242)*f), int(201 - (201-60)*f), int(76 - (76-40)*f))
+
+
+# ==================== HAVA DURUMU (sol ust kose) ====================
+_weather = {"temp": None, "ts": 0.0}
+_WEATHER_REFRESH = 900          # 15 dk
+# Ankara koordinati (Open-Meteo - anahtarsiz, hizli, guvenilir)
+_WEATHER_LAT = 39.93
+_WEATHER_LON = 32.86
+
+
+
+def _arc_dots_m(surf, cx, cy, radius, deg_start, deg_end, width, color_fn):
+    """Yayi sik dolu dairelerle ciz (modul seviyesi, surf parametreli)."""
+    if deg_end <= deg_start:
+        return
+    r = max(2, width // 2)
+    arc_len = math.radians(deg_end - deg_start) * radius
+    steps = max(3, int(arc_len / max(1, r * 0.55)))
+    for i in range(steps + 1):
+        f = i / steps
+        deg = deg_start + (deg_end - deg_start) * f
+        a = math.radians(deg)
+        x = cx + radius * math.cos(a)
+        y = cy + radius * math.sin(a)
+        col = color_fn((deg - 150) / 240.0)
+        pygame.draw.circle(surf, col, (int(x), int(y)), r)
+
+
+
+def draw_card_gauge_m(surf, cx, cy, radius, frac, base_color=None):
+    """Dairesel ilerleme halkasi (modul seviyesi). Gradient, puruzsuz."""
+    frac = max(0.0, min(1.0, frac))
+    _arc_dots_m(surf, cx, cy, radius, 150, 390, 11, lambda t: (36, 45, 58))
+    if frac <= 0.005:
+        return
+    end_deg = 150 + 240 * frac
+    _arc_dots_m(surf, cx, cy, radius, 150, end_deg, 11, _sm_grad_rgb)
+
+
+
+def _short_disk_name(model):
+    """Uzun disk modelini kisa okunakli isme cevir."""
+    m = model.strip()
+    # bilinen markalar -> kisa ad
+    mapping = [
+        ("WD_BLACK SN850X", "WD_BLACK SN850X"),
+        ("Samsung SSD 9100 PRO", "Samsung 9100 PRO"),
+        ("ADATA SX8200PNP", "ADATA SX8200PNP"),
+        ("KIOXIA-EXCERIA PLUS G4", "KIOXIA EXCERIA G4"),
+        ("WDS500G3X0C", "WD Blue SN570"),
+        ("MTFDDAK256TBN", "Micron 5400 256G"),
+        ("ST4000DM004", "Seagate BarraCuda 4TB"),
+        ("ST1000LM048", "Seagate BarraCuda 1TB"),
+        ("ST500LT012", "Seagate 500GB"),
+    ]
+    for pat, short in mapping:
+        if m.startswith(pat) or pat in m:
+            return short
+    return m[:20]
+
+
+
+def draw_sysmon_disks(surf, disks):
+    """SAYFA 2: 9 diskin sicakliklari (ust: NVMe, alt: SATA)."""
+    surf.fill((8, 10, 8))
+    WIDTH, HEIGHT = surf.get_size()
+    SCALE = max(0.35, WIDTH / 1920.0)   # LCD (1920) referansli olcek
+
+    def temp_color(t):
+        if t is None: return (60, 66, 60)
+        if t < 50: return (60, 230, 90)
+        if t < 65: return (245, 210, 60)
+        return (235, 60, 40)
+
+    # baslik SAG UST (hava sol ustte, cakismaz)
+    tf = _font(max(9, int(22 * SCALE)))
+    ts = tf.render("DİSK ISISI", True, (150, 165, 180))
+    surf.blit(ts, (WIDTH - ts.get_width() - 18, 10))
+
+    nvme = [x for x in disks if x[2] == "nvme"]
+    sata = [x for x in disks if x[2] == "sata"]
+
+    def draw_disk_row(items, row_top, row_h, tag):
+        if not items:
+            return
+        margin = 16
+        gap = 8
+        n = max(len(items), 1)
+        card_w = (WIDTH - 2*margin - (n-1)*gap) // n
+        for idx, (model, temp, typ) in enumerate(items):
+            cx0 = margin + idx * (card_w + gap)
+            ccx = cx0 + card_w // 2
+            col = temp_color(temp)
+            frac = max(0.0, min(1.0, temp / 90.0))
+            # kart
+            pygame.draw.rect(surf, (22, 27, 34), (cx0, row_top, card_w, row_h), border_radius=12)
+            pygame.draw.rect(surf, (35, 43, 54), (cx0, row_top, card_w, row_h), 1, border_radius=12)
+            # gauge halka
+            gcx = ccx; gcy = row_top + int(row_h * 0.40)
+            gr = int(min(card_w, row_h) * 0.42)
+            gcol = _sm_grad_rgb(frac)
+            draw_card_gauge_m(surf, gcx, gcy, gr, frac, gcol)
+            # sicaklik rakami
+            vf = _font(int(gr * 0.9))
+            vs = vf.render(f"{temp}", True, gcol)
+            surf.blit(vs, (gcx - vs.get_width()//2, gcy - vs.get_height()//2))
+            # C birimi
+            uf = _font(max(9, int(14 * SCALE)))
+            us = uf.render("C", True, (170, 182, 196))
+            surf.blit(us, (ccx - us.get_width()//2, row_top + int(row_h*0.66)))
+            # disk adi - kisa ve okunakli isim
+            name = _short_disk_name(model)
+            # karta sigacak en buyuk fontu bul (18'den asagi)
+            nsize = 24
+            nf = _font(nsize)
+            while nf.size(name)[0] > card_w - 8 and nsize > 12:
+                nsize -= 1
+                nf = _font(nsize)
+            ns = nf.render(name, True, (225, 232, 242))
+            surf.blit(ns, (ccx - ns.get_width()//2, row_top + int(row_h*0.80)))
+
+    half = HEIGHT // 2
+    draw_disk_row(nvme, 34, half - 40, "nvme")
+    draw_disk_row(sata, half + 6, half - 40, "sata")
+
+
+def _core_heat_rgb(temp):
+    """Cekirdek sicakligina gore renk: mavi(soguk)->yesil->sari->kirmizi(sicak)."""
+    if temp <= 0:
+        return (30, 34, 42)   # uyuyan cekirdek: koyu gri
+    # 30C mavi, 50C yesil, 70C sari, 90C+ kirmizi
+    t = max(30.0, min(95.0, temp))
+    if t < 50:
+        f = (t - 30) / 20.0   # mavi -> yesil
+        return (int(40 + f*20), int(120 + f*110), int(200 - f*110))
+    elif t < 70:
+        f = (t - 50) / 20.0   # yesil -> sari
+        return (int(60 + f*195), int(230 - f*20), int(90 - f*80))
+    else:
+        f = (t - 70) / 25.0   # sari -> kirmizi
+        return (int(255), int(210 - f*160), int(10))
+
+
+
+def draw_sysmon_cores(surf, ipg):
+    """SAYFA 3: 24 cekirdek isi haritasi (Intel Power Gadget).
+    Her cekirdek renkli kutu: sicakliga gore renk + frekans/sicaklik yazi."""
+    surf.fill((8, 10, 8))
+    WIDTH, HEIGHT = surf.get_size()
+    SCALE = max(0.35, WIDTH / 1920.0)   # LCD (1920) referansli olcek
+    cores = ipg.get("cores") or []
+
+    # baslik SAG UST
+    tf = _font(max(9, int(22 * SCALE)))
+    ts = tf.render("ÇEKİRDEK ISI HARİTASI", True, (150, 165, 180))
+    surf.blit(ts, (WIDTH - ts.get_width() - 18, 8))
+
+    # paket ozeti SOL UST (hava'nin altina)
+    pf = _font(max(9, int(20 * SCALE)))
+    pw = ipg.get("pkg_power"); pt = ipg.get("pkg_temp"); tdp = ipg.get("tdp")
+    summary = []
+    if pt: summary.append(f"CPU {pt:.0f}°C")
+    if pw: summary.append(f"{pw:.0f}W")
+    if tdp: summary.append(f"TDP {tdp:.0f}W")
+    if summary:
+        ps = pf.render("   ".join(summary), True, (200, 210, 220))
+        surf.blit(ps, (18, 40))
+
+    if not cores:
+        f = _font(max(9, int(30 * SCALE)))
+        surf.blit(f.render("Intel Power Gadget verisi yok", True, (200, 120, 60)),
+                  (60, HEIGHT//2))
+        return
+
+    n = len(cores)
+    # 24 cekirdek -> 12 sutun x 2 satir
+    cols = 12
+    rows = (n + cols - 1) // cols
+    margin_x = 16
+    top = 72
+    gap = 6
+    cell_w = (WIDTH - 2*margin_x - (cols-1)*gap) // cols
+    avail_h = HEIGHT - top - 12
+    cell_h = (avail_h - (rows-1)*gap) // rows
+
+    for idx, (cnum, freq, temp) in enumerate(cores):
+        r = idx // cols
+        c = idx % cols
+        x = margin_x + c * (cell_w + gap)
+        y = top + r * (cell_h + gap)
+        col = _core_heat_rgb(temp)
+        # kutu
+        pygame.draw.rect(surf, col, (x, y, cell_w, cell_h), border_radius=8)
+        # cekirdek no (sol ust, kucuk)
+        nf = _font(max(8, int(min(cell_w, cell_h) * 0.16)))
+        ns = nf.render(f"C{cnum}", True, (255, 255, 255) if temp > 55 else (200, 210, 220))
+        surf.blit(ns, (x + 4, y + 3))
+        if temp > 0:
+            # sicaklik (buyuk, ortada)
+            tf2 = _font(max(10, int(min(cell_w, cell_h) * 0.34)))
+            tcol = (255, 255, 255) if temp > 55 else (20, 24, 20)
+            tsr = tf2.render(f"{temp:.0f}°", True, tcol)
+            surf.blit(tsr, (x + cell_w//2 - tsr.get_width()//2, y + int(cell_h*0.28)))
+            # frekans (alt, kucuk)
+            ff = _font(max(8, int(min(cell_w, cell_h) * 0.16)))
+            fs = ff.render(f"{freq/1000:.1f}G", True, tcol)
+            surf.blit(fs, (x + cell_w//2 - fs.get_width()//2, y + int(cell_h*0.68)))
+        else:
+            # uyuyan cekirdek
+            sf = _font(max(8, int(min(cell_w, cell_h) * 0.17)))
+            ss = sf.render("uyku", True, (90, 100, 110))
+            surf.blit(ss, (x + cell_w//2 - ss.get_width()//2, y + cell_h//2 - 8))
+
+
+
+_page = [0]   # 0=kartlar, 1=disk, 2=cekirdek (1/2/3 tuslari)
+
+
 def draw(screen, d):
+    if _page[0] == 1:
+        draw_sysmon_disks(screen, d.get("disks") or [])
+        return
+    if _page[0] == 2:
+        draw_sysmon_cores(screen, d.get("ipg") or {})
+        return
     W, H = screen.get_size()
     screen.fill((10, 12, 14))
     GREEN = (60, 230, 90)
@@ -223,7 +457,13 @@ def main():
             if event.type == pygame.QUIT:
                 running = False
             elif event.type == pygame.KEYDOWN:
-                if event.key in (pygame.K_q, pygame.K_ESCAPE):
+                if event.key == pygame.K_1:
+                    _page[0] = 0
+                elif event.key == pygame.K_2:
+                    _page[0] = 1
+                elif event.key == pygame.K_3:
+                    _page[0] = 2
+                elif event.key in (pygame.K_q, pygame.K_ESCAPE):
                     running = False
 
         if mon is not None:
