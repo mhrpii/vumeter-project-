@@ -12,6 +12,8 @@ from collections import deque as _deque
 try:
     if sys.platform == "win32":
         import sysmon_win as sysmon
+    elif sys.platform == "darwin":
+        import sysmon_mac as sysmon
     else:
         import sysmon
 except Exception as _e:
@@ -71,6 +73,21 @@ def draw_card_graph(surf, cx0, cy0, cw, ch, hist, base_color):
     surf.set_clip(prev_clip)
 
 
+# Kart aciklamalari (etiket -> kucuk aciklama satiri)
+_CARD_DESC = {
+    "CPU": "İşlemci sıcaklığı", "Çkrdk": "En sıcak çekirdek",
+    "GPU": "GPU kenar ısısı", "Jnc": "GPU en sıcak nokta",
+    "VMem": "GPU bellek ısısı", "GBellek": "GPU bellek saati",
+    "VRM": "Güç katı ısısı", "VCore": "CPU voltajı",
+    "PCH": "Yonga seti ısısı", "Sys": "Anakart ısısı",
+    "CPU%": "İşlemci kullanımı", "GPU%": "GPU kullanımı",
+    "RAM": "Bellek kullanımı", "VRAM": "GPU bellek dolu",
+    "GHz": "CPU hızı", "C-W": "CPU gücü", "G-W": "GPU gücü",
+    "CFan": "CPU fan devri", "Pump": "Pompa devri", "GFan": "GPU fan devri",
+    "İndir": "Ağ indirme", "Yükle": "Ağ yükleme",
+}
+
+
 def draw(screen, d):
     W, H = screen.get_size()
     screen.fill((10, 12, 14))
@@ -106,8 +123,16 @@ def draw(screen, d):
         ("Çkrdk",f"{cores:.0f}"  if cores is not None else "--", "C", (cores/100.0)  if cores else 0, col(cores)),
         ("GPU",  f"{gpu_e:.0f}"  if gpu_e is not None else "--", "C", (gpu_e/100.0)  if gpu_e else 0, col(gpu_e)),
         ("Jnc",  f"{gpu_j:.0f}"  if gpu_j is not None else "--", "C", (gpu_j/110.0)  if gpu_j else 0, col(gpu_j)),
-        ("VMem", f"{gpu_m:.0f}"  if gpu_m is not None else "--", "C", (gpu_m/100.0)  if gpu_m else 0, col(gpu_m)),
-        ("VRM",  f"{vrm:.0f}"    if vrm is not None else "--",   "C", (vrm/100.0)    if vrm else 0,   col(vrm)),
+        (("GBellek" if sys.platform == "darwin" else "VMem"),
+         (f"{d.get('gpu_mem_clock'):.0f}" if (sys.platform == "darwin" and d.get('gpu_mem_clock')) else (f"{gpu_m:.0f}" if gpu_m is not None else "--")),
+         ("MHz" if sys.platform == "darwin" else "C"),
+         ((d.get('gpu_mem_clock', 0) or 0)/2000.0 if sys.platform == "darwin" else ((gpu_m/100.0) if gpu_m else 0)),
+         (GREEN if sys.platform == "darwin" else col(gpu_m))),
+        (("VCore" if sys.platform == "darwin" else "VRM"),
+         (f"{d.get('cpu_voltage'):.2f}" if (sys.platform == "darwin" and d.get('cpu_voltage')) else (f"{vrm:.0f}" if vrm is not None else "--")),
+         ("V" if sys.platform == "darwin" else "C"),
+         ((d.get('cpu_voltage', 0) or 0)/1.5 if sys.platform == "darwin" else ((vrm/100.0) if vrm else 0)),
+         (GREEN if sys.platform == "darwin" else col(vrm))),
         ("PCH",  f"{pch:.0f}"    if pch is not None else "--",   "C", (pch/90.0)     if pch else 0,   col(pch)),
         ("Sys",  f"{mbsys:.0f}"  if mbsys is not None else "--", "C", (mbsys/80.0)   if mbsys else 0, col(mbsys)),
         ("CPU%", f"{use:.0f}"    if use is not None else "--",   "%", (use/100.0)    if use is not None else 0, GREEN),
@@ -162,6 +187,21 @@ def draw(screen, d):
                 screen.blit(us, (ccx - us.get_width()//2, card_top + int(card_h*0.46)))
             ls = lblf.render(lbl, True, (210, 220, 232))
             screen.blit(ls, (ccx - ls.get_width()//2, card_top + int(card_h*0.62)))
+            desc = _CARD_DESC.get(lbl) or ("Kasa fanı" if lbl.startswith("S") and lbl[1:].isdigit() else None)
+            if desc:
+                _dc = (60, 200, 210)   # camgobegi
+                descf = _font(max(13, int(_ref_w * 0.16)), bold=False)
+                words = desc.split()
+                # tek satirda sigmiyorsa iki satira bol (kelimeden)
+                one = descf.render(desc, True, _dc)
+                if one.get_width() <= card_w - 8 or len(words) < 2:
+                    screen.blit(one, (ccx - one.get_width()//2, card_top + int(card_h*0.80)))
+                else:
+                    mid = len(words) // 2 + (len(words) % 2)
+                    l1 = descf.render(" ".join(words[:mid]), True, _dc)
+                    l2 = descf.render(" ".join(words[mid:]), True, _dc)
+                    screen.blit(l1, (ccx - l1.get_width()//2, card_top + int(card_h*0.78)))
+                    screen.blit(l2, (ccx - l2.get_width()//2, card_top + int(card_h*0.88)))
 
     draw_row(bars_top, 0, half)
     draw_row(bars_bot, half, H)
