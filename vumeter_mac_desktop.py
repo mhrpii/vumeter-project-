@@ -1315,13 +1315,6 @@ def setup_tray():
                 open_control()
         tray.activated.connect(on_tray_activated)
 
-        # Menuye de en uste "Kontrol Paneli Ac" ekle
-        first = menu.actions()[0] if menu.actions() else None
-        open_act = QAction("Kontrol Paneli Ac", menu)
-        open_act.triggered.connect(open_control)
-        menu.insertAction(first, open_act)
-        menu.insertSeparator(first)
-
         tray.setContextMenu(menu)
         tray.show()
         return app
