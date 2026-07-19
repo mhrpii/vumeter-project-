@@ -15,7 +15,13 @@ import time
 if "--sysmon" in sys.argv:
     try:
         import sysmon_window
-        sysmon_window.main()
+        _pg = 0
+        if "--page" in sys.argv:
+            try:
+                _pg = int(sys.argv[sys.argv.index("--page") + 1])
+            except Exception:
+                _pg = 0
+        sysmon_window.main(start_page=_pg)
     except Exception as _e:
         print("sysmon_window hata:", _e)
     sys.exit(0)
@@ -45,6 +51,7 @@ COLOR_THEMES = {
     "Yesil": [(0, 170, 0), (255, 255, 0), (255, 0, 0)],
     "Neon":  [(0, 255, 255), (255, 0, 255), (255, 255, 0)],
     "Mor":   [(120, 0, 200), (220, 60, 220), (255, 220, 255)],
+    "Camgobegi": [(0, 40, 80), (0, 200, 210), (200, 255, 255)],
 }
 COLOR_THEME_NAMES = list(COLOR_THEMES.keys())
 
@@ -1174,12 +1181,12 @@ def setup_tray():
         menu.addSeparator()
 
         # Sistem Monitoru (ayri pencere)
-        def open_sysmon():
+        def open_sysmon(page=0):
             try:
                 if getattr(sys, "frozen", False):
-                    subprocess.Popen([sys.executable, "--sysmon"])
+                    subprocess.Popen([sys.executable, "--sysmon", "--page", str(page)])
                 else:
-                    subprocess.Popen([sys.executable, os.path.abspath(__file__), "--sysmon"])
+                    subprocess.Popen([sys.executable, os.path.abspath(__file__), "--sysmon", "--page", str(page)])
             except Exception:
                 pass
         smon = QAction("Sistem Monitoru", menu)
@@ -1258,6 +1265,25 @@ def setup_tray():
 
         # SOL TIK -> kontrol penceresi (her seferinde sag tik menu gerekmesin)
         _ctrl_win = [None]
+
+        def _position_near_tray(w):
+            """LCD'deki gibi: pencere tray ikonunun altina, sag hizali."""
+            try:
+                from PyQt5.QtWidgets import QApplication as _QApp
+                scr = _QApp.primaryScreen().availableGeometry()
+                geo = tray.geometry()
+                if geo.width() > 0:
+                    x = geo.right() - w.width() - 40
+                    y = geo.bottom() + 6
+                else:
+                    x = scr.right() - w.width() - 12
+                    y = scr.top() + 30
+                x = max(scr.left() + 6, min(x, scr.right() - w.width() - 6))
+                y = max(scr.top() + 6, y)
+                w.move(int(x), int(y))
+            except Exception:
+                pass
+
         def open_control():
             try:
                 import control_window_desktop as cwd
@@ -1271,6 +1297,14 @@ def setup_tray():
                     _tray_refs["ctrl"] = _ctrl_win[0]
                 cw = _ctrl_win[0]
                 if hasattr(cw, "_refresh"): cw._refresh()
+                cw.adjustSize()
+                _position_near_tray(cw)
+                cw.adjustSize()
+                _position_near_tray(cw)
+                cw.adjustSize()
+                _position_near_tray(cw)
+                cw.adjustSize()
+                _position_near_tray(cw)
                 cw.show(); cw.raise_(); cw.activateWindow()
             except Exception as e:
                 print(f"Kontrol penceresi hatasi: {e}")

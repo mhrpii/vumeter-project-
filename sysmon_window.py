@@ -441,7 +441,8 @@ def draw(screen, d):
     draw_row(bars_bot, half, H)
 
 
-def main():
+def main(start_page=0):
+    _page[0] = start_page
     # mixer'siz init (ses aygiti acmasin -> LG OSD tetiklemesin)
     os.environ.setdefault("SDL_AUDIODRIVER", "dummy")
     pygame.display.init()

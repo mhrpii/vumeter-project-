@@ -117,8 +117,20 @@ def build_control_window(state, color_themes, led_themes, vu_dial_count,
     root.addWidget(_sep())
     # alt satir: Sistem Monitoru + Cikis
     bottom = QHBoxLayout(); bottom.setSpacing(8)
-    smon_b = QPushButton("Sistem Monitörü")
+    smon_lbl = QLabel("SİSTEM MONİTÖRÜ"); smon_lbl.setObjectName("hdr")
+    root_smon = QGridLayout(); root_smon.setSpacing(6)
+    for _i, (_t, _p) in enumerate((("Sensörler", 0), ("Disk Isıları", 1), ("Çekirdek Isıları", 2))):
+        _b = QPushButton(_t)
+        def _mk(pg):
+            def _f(): open_sysmon(pg)
+            return _f
+        _b.clicked.connect(_mk(_p))
+        root_smon.addWidget(_b, 0, _i)
+    smon_b = QPushButton("Sistem Monitörü")  # eski buton gizli uyumluluk icin
+    smon_b.setVisible(False)
     smon_b.clicked.connect(lambda: open_sysmon())
+    root.addWidget(smon_lbl)
+    root.addLayout(root_smon)
     bottom.addWidget(smon_b)
     quit_b = QPushButton("Çıkış"); quit_b.setObjectName("quit")
     quit_b.clicked.connect(lambda: on_quit())
