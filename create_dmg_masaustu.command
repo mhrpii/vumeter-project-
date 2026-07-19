@@ -11,7 +11,7 @@ STAGING="$(mktemp -d)/VU_Meter_Masaustu"
 mkdir -p "$STAGING"
 
 echo "[*] Dosyalar toplaniyor..."
-FILES="vumeter_mac_desktop.py sysmon_window.py sysmon_mac.py smc_read.c gpu_read.c disk_read.c ipg_read.c kur_masaustu.command app_icon_1024.png vu_bg.png vu_bg2.png vu_bg3.png README_MAC.md"
+FILES="vumeter_mac_desktop.py control_window_desktop.py sysmon_window.py sysmon_mac.py smc_read.c gpu_read.c disk_read.c ipg_read.c kur_masaustu.command app_icon_1024.png vu_bg.png vu_bg2.png vu_bg3.png README_MAC.md"
 for f in $FILES; do
     if [ -e "$f" ]; then
         cp "$f" "$STAGING/" && echo "    + $f"

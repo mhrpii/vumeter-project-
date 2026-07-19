@@ -54,7 +54,7 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/app"
 
 # gereken dosyalar
-FILES="vumeter_mac_desktop.py sysmon_window.py sysmon_mac.py smc_read gpu_read disk_read ipg_read smc_read.c gpu_read.c disk_read.c ipg_read.c vu_bg.png vu_bg2.png vu_bg3.png"
+FILES="vumeter_mac_desktop.py control_window_desktop.py sysmon_window.py sysmon_mac.py smc_read gpu_read disk_read ipg_read smc_read.c gpu_read.c disk_read.c ipg_read.c vu_bg.png vu_bg2.png vu_bg3.png"
 for f in $FILES; do
     [ -e "$f" ] && cp "$f" "$APP/Contents/Resources/app/" 2>/dev/null
 done
