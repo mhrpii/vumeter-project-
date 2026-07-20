@@ -1239,6 +1239,18 @@ def draw_spectrum(surf, cava_bars, theme_name, fps):
 
 
 # ==================== API SENDER (ayri process) ====================
+_VLOG_PATH = os.path.expanduser("~/Library/Logs/vumeter_lcd.log")
+
+def _vlog(msg):
+    """Konsola + log dosyasina yaz (.app'ten calisirken teshis icin)."""
+    print(msg)
+    try:
+        with open(_VLOG_PATH, "a") as f:
+            f.write(time.strftime("%Y-%m-%d %H:%M:%S ") + str(msg) + "\n")
+    except Exception:
+        pass
+
+
 def sender_process_main(shm_name, frame_counter, w, h, brightness=None):
     """Ayri surec: shared memory'den kareyi al -> DOGRUDAN USB ile panele yaz.
     trcc / HTTP / PNG / disk YOK. (trcc_direct.py protokolu kullanir)
@@ -1264,16 +1276,27 @@ def sender_process_main(shm_name, frame_counter, w, h, brightness=None):
             try:
                 d.connect()
                 if deneme > 0:
-                    print(f"[sender] panel geri geldi (deneme {deneme+1}).")
+                    _vlog(f"[sender] panel geri geldi (deneme {deneme+1}).")
                 return d
             except Exception as e:
                 deneme += 1
                 if deneme <= 3 or deneme % 12 == 0:
-                    print(f"[sender] baglanti bekleniyor ({deneme}): {type(e).__name__}: {e}")
+                    _vlog(f"[sender] baglanti bekleniyor ({deneme}): {type(e).__name__}: {e}")
                 try:
                     d.close()
                 except Exception:
                     pass
+                # BELLEK SIZINTISI ONLEME: libusb kaynaklarini acikca birak
+                # (binlerce deneme birikince GB'larca RAM yiyordu)
+                try:
+                    import usb.util as _uu
+                    if getattr(d, "dev", None) is not None:
+                        _uu.dispose_resources(d.dev)
+                        d.dev = None
+                except Exception:
+                    pass
+                import gc as _gc
+                _gc.collect()
                 time.sleep(5.0)
 
     dev = _baglan_donene_kadar()
@@ -1314,10 +1337,10 @@ def sender_process_main(shm_name, frame_counter, w, h, brightness=None):
                 except Exception as e:
                     errs += 1
                     if errs <= 3 or errs % 50 == 0:
-                        print(f"[sender] HATA #{errs}: {type(e).__name__}: {e}")
+                        _vlog(f"[sender] HATA #{errs}: {type(e).__name__}: {e}")
                     if errs >= 5:
                         # USB olmus olabilir (uyku sonrasi tipik). Yeniden kur:
-                        print("[sender] USB toparlaniyor: kapat + akilli reset ile yeniden baglan...")
+                        _vlog("[sender] USB toparlaniyor: kapat + akilli reset ile yeniden baglan...")
                         try:
                             dev.close()
                         except Exception:
