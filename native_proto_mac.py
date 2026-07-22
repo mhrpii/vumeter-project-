@@ -1109,8 +1109,12 @@ class CavaReader:
                                 if cur != self._active_source:
                                     self._restart_cava()
                                     continue
-                            # 5sn: kaynak ayni ama hala sifir -> cava yenile
-                            if elapsed > 5.0 and not self._pw_reset_done:
+                            # Mac DUZELTMESI: sessizlik ARIZA DEGIL (muzik durmus/
+                            # sakin pasaj olabilir - idle ekrani bunun icin var).
+                            # Eski 5sn kurali cava'yi olduruyordu -> restart+warmup
+                            # 10-20sn boslugu yaratip muzikte VINTAGE'a sebep oluyordu.
+                            # Restart SADECE cok uzun sifirda (120sn) tek deneme.
+                            if elapsed > 120.0 and not self._pw_reset_done:
                                 self._restart_cava()
                                 self._pw_reset_done = "cava"
                                 continue
