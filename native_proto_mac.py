@@ -963,6 +963,7 @@ sensitivity = 100
 [input]
 method = portaudio
 source = {_detect_mac_audio_source()}
+channels = 1
 
 [output]
 method = raw
@@ -998,6 +999,7 @@ class CavaReader:
         self._active_source = None
         self._zero_since = None
         self._cur_autosens = 0   # HEP 0: auto-gain yazilimsal (restart/donma yok)
+        self.raw_mean = 0.0      # ham ortalama (idle karari icin)
         self._ag_peak = 0.0      # yazilimsal auto-gain: sonumlenen tepe izleyici
         self._ag_mult = 1.0      # yazilimsal auto-gain: yumusak carpan
         self._sleep_paused = False  # uyku-dostu durdurma bayragi
@@ -1145,6 +1147,9 @@ class CavaReader:
         # sonumlenen tepe izlenir; tepe dusukse carpan buyur (kisik muzik dolar),
         # yuksekse 1'e yaklasir (tasmaz). Self-noise cava'dan 0 cikar -> 0x carpan=0.
         cur_peak = max(raw) if raw else 0
+        # HAM ortalama (gain'den BAGIMSIZ) - idle karari icin disari acik.
+        # Gain'li ortalama kullanilirsa sakin pasajlarda yanlis VINTAGE gorunur.
+        self.raw_mean = (sum(raw) / len(raw)) if raw else 0.0
         if cur_peak > self._ag_peak:
             self._ag_peak = float(cur_peak)     # ani yukselisi hemen izle
         else:
@@ -1655,9 +1660,12 @@ def main():
             # last_sound SADECE gercek muzikte guncellensin (ortalama > 25).
             # max bazli olursa self-noise (max yuksek, ort dusuk) last_sound'u
             # gunceller -> silence hic 30'a ulasmaz -> autosens hep acik -> kisir dongu.
-            if snap and (sum(snap) / len(snap)) > 25:
+            # HAM ortalama ile karar (gain'den bagimsiz): sakin pasajlarda
+            # gain dusukken bile gercek muzik ham veride gorunur.
+            # Esik 10: Scarlett self-noise ustunde, sakin muzik altinda degil.
+            if snap and getattr(cava, "raw_mean", 0) > 10:
                 _state["last_sound"] = time.time()
-            idle = (time.time() - _state.get("last_sound", 0)) > 8.0
+            idle = (time.time() - _state.get("last_sound", 0)) > 15.0
             # AUTOSENS dinamik: kisa sessizliklerde (sarki arasi) ACIK kalir ki
             # muzik gelince ANINDA bar gelsin (restart yok). Sadece UZUN sessizlikte
             # (30s+, gurultu 38s'de sismeden once) kapanir -> Scarlett self-noise sismez.
