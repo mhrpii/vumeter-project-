@@ -27,7 +27,7 @@ for f in native_proto_mac.py sysmon_mac.py control_window.py trcc_direct.py; do
 done
 
 # C kaynak dosyalari (hedef Mac'te derlenecek)
-for f in smc_read.c gpu_read.c disk_read.c ipg_read.c; do
+for f in smc_read.c gpu_read.c disk_read.c ipg_read.c make_aggregate.c; do
     [ -f "$f" ] && cp "$f" "$STAGING/" && echo "    + $f"
 done
 

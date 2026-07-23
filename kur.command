@@ -80,7 +80,9 @@ echo "[*] Ses yakalama (BlackHole) kontrol ediliyor..."
 if system_profiler SPAudioDataType 2>/dev/null | grep -qi "BlackHole"; then
     echo "[OK] BlackHole kurulu."
 else
-    echo "[!] BlackHole KURULU DEGIL. Ses gorsellestirme icin gerekli."
+    echo "[i] BlackHole kurulu degil - SORUN DEGIL: Scarlett gibi loopback'li
+    ses karti varsa gerek YOK (otomatik aggregate ile calisir).
+    Loopback'siz aygitlar (dahili hoparlor vb.) icin alternatif:"
     echo "    macOS, hoparlorden calan sesi dogrudan yakalatmaz; BlackHole (sanal"
     echo "    ses aygiti) gerekir."
     echo "    1) Indir: https://existential.audio/blackhole/ (2ch) — .pkg installer"
@@ -117,6 +119,11 @@ if [ -d "/Library/Frameworks/IntelPowerGadget.framework" ]; then
 else
     echo "    [!] Intel Power Gadget yok — cekirdek isi haritasi calismaz (opsiyonel)."
 fi
+compile make_aggregate make_aggregate.c -framework CoreAudio -framework CoreFoundation
+if [ -x "make_aggregate" ]; then
+    AGGOUT=$(./make_aggregate)
+    echo "    [*] Aggregate Device (Tahoe ses yolu): $AGGOUT"
+fi
 
 # --- 6) .app bundle olustur ---
 echo ""
@@ -127,7 +134,7 @@ mkdir -p "$APP/Contents/MacOS"
 mkdir -p "$APP/Contents/Resources/app"
 cp *.py                                 "$APP/Contents/Resources/app/" 2>/dev/null
 cp *.c                                  "$APP/Contents/Resources/app/" 2>/dev/null
-cp smc_read gpu_read disk_read ipg_read "$APP/Contents/Resources/app/" 2>/dev/null
+cp smc_read gpu_read disk_read ipg_read make_aggregate "$APP/Contents/Resources/app/" 2>/dev/null
 cp *.png                                "$APP/Contents/Resources/app/" 2>/dev/null
 
 cat > "$APP/Contents/Info.plist" << 'PLIST'

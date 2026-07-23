@@ -33,6 +33,42 @@ FPS = 30                            # native API'de daha yuksek denenebilir
 # Boylece her Mac'te calisir (Scarlett'e bagimli degil).
 _MAC_AUDIO_CACHE = {"src": None}
 
+def _sd_device_names():
+    """portaudio giris aygitlarinin adlari (sounddevice ile)."""
+    try:
+        import sounddevice as _sdv
+        return [d['name'] for d in _sdv.query_devices() if d['max_input_channels'] > 0]
+    except Exception:
+        return []
+
+
+def _ensure_aggregate():
+    """Tahoe+ ses yolu: VU-ScarlettLoop aggregate yoksa make_aggregate ile olustur.
+    (Kullanici Audio MIDI'den silse bile acilista kendini onarir.)"""
+    try:
+        if any("VU-ScarlettLoop" in n for n in _sd_device_names()):
+            return True
+        # get_resource_path henuz tanimli degil (dosyanin asagisinda) ->
+        # yolu dogrudan coz: script'in kendi dizini (.app icinde de dogru)
+        binp = os.path.join(os.path.dirname(os.path.abspath(__file__)), "make_aggregate")
+        if os.path.exists(binp):
+            out = subprocess.run([binp], capture_output=True, text=True,
+                                 timeout=10).stdout.strip()
+            print(f"[ses] aggregate kontrol: {out}")
+            # CoreAudio'nun aygiti kaydetmesini BEKLE (yoklamali, en fazla 5sn):
+            # 1sn sabit bekleme yetmiyordu -> kaynak cache'i Scarlett'e dusuyordu.
+            for _ in range(10):
+                time.sleep(0.5)
+                chk = subprocess.run([binp], capture_output=True, text=True,
+                                     timeout=10).stdout.strip()
+                if chk == "VAR":
+                    print("[ses] VU-ScarlettLoop hazir.")
+                    return True
+    except Exception as e:
+        print(f"[ses] aggregate olusturulamadi: {type(e).__name__}")
+    return False
+
+
 def _detect_mac_audio_source():
     """cava (portaudio) icin uygun ses kaynagini otomatik bul.
     Mantik: cava, sesin CIKTIGI aygiti dinlemeli (o aygitin sesini gorsellestirir).
@@ -43,6 +79,17 @@ def _detect_mac_audio_source():
       4) ilk ses aygiti"""
     if _MAC_AUDIO_CACHE["src"]:
         return _MAC_AUDIO_CACHE["src"]
+    # TAHOE COZUMU: VU-ScarlettLoop aggregate (make_aggregate dogruladiysa
+    # ismi DOGRUDAN kullan - sounddevice surec-ici onbellegi yeni aygiti
+    # goremeyebiliyor, make_aggregate ayri surec oldugu icin her zaman taze).
+    if _ensure_aggregate():
+        _MAC_AUDIO_CACHE["src"] = "VU-ScarlettLoop"
+        return "VU-ScarlettLoop"
+    # (genel aggregate yedegi - kullanicinin kendi olusturdugu varsa)
+    for n in _sd_device_names():
+        if "Aggregate" in n or "ScarlettLoop" in n:
+            _MAC_AUDIO_CACHE["src"] = n
+            return n
     src = None
     default_out = None
     names = []
@@ -504,6 +551,20 @@ def _short_disk_name(model):
     return m[:20]
 
 
+
+def _kapasite_str(gb):
+    """996GB -> 1TB, 512GB, 4TB gibi yuvarlanmis kapasite etiketi."""
+    if gb >= 900:
+        tb = gb / 1000.0
+        # 0.5 adimlarla yuvarla (1TB, 2TB, 4TB)
+        t = round(tb * 2) / 2
+        return (f"{t:.1f}".rstrip("0").rstrip(".")) + "TB"
+    # GB: standart boyutlara yuvarla
+    for std in (120, 128, 240, 250, 256, 480, 500, 512, 750):
+        if abs(gb - std) < 20:
+            return f"{std}GB"
+    return f"{gb:.0f}GB"
+
 def draw_sysmon_disks(surf, disks, usage=None):
     """SAYFA 2: 9 diskin sicakliklari (ust: NVMe, alt: SATA).
     usage: {model: yuzde} - kartin sol kenarina dikey doluluk bari (fiziksel disk tamami)."""
@@ -555,7 +616,13 @@ def draw_sysmon_disks(surf, disks, usage=None):
             us = uf.render("°C", True, (170, 182, 196))
             surf.blit(us, (vx + vs.get_width() + 2, vy - 2))
             # disk adi - kisa ve okunakli isim
+            _u = usage.get(model)
+            pct = (_u[0] if isinstance(_u, tuple) else (_u or 0.0))
+            _gb = (_u[1] if isinstance(_u, tuple) and len(_u) > 1 else None)
             name = _short_disk_name(model)
+            # isimde kapasite yoksa gercek veriden ekle (tutarlilik)
+            if _gb and not any(x in name for x in ("GB", "TB", "G ")):
+                name = f"{name} {_kapasite_str(_gb)}"
             # karta sigacak en buyuk fontu bul (18'den asagi)
             nsize = 24
             nf = _sm_font(nsize)
@@ -565,7 +632,7 @@ def draw_sysmon_disks(surf, disks, usage=None):
             ns = nf.render(name, True, (225, 232, 242))
             surf.blit(ns, (ccx - ns.get_width()//2, row_top + int(row_h*0.80)))
             # DIKEY DOLULUK BARI (sol ic kenar): fiziksel diskin tamamina gore.
-            pct = usage.get(model, 0.0)   # bagli degilse 0 goster (bar bos)
+
             if True:
                 bw = max(6, int(card_w * 0.055))
                 bx = cx0 + 7
@@ -974,6 +1041,11 @@ def _find_cava_bin():
 
 
 def write_cava_config(bars=NUM_BARS, fps=60, autosens=0):
+    _src = _detect_mac_audio_source()
+    # VU-ScarlettLoop (aggregate): stereo modda CoreAudio 4->2 karisimi
+    # loopback'i DAHIL EDIYOR (mono taze aggregate'te kanal 1'e esleniyor - sessiz).
+    # Diger kaynaklarda mono karisim (eski davranis) korunur.
+    _ch = 2 if "ScarlettLoop" in _src or "Aggregate" in _src else 1
     """Mac: portaudio + sabit Scarlett kaynagi. autosens dinamik (idle'da 0, muzikte 1)."""
     os.makedirs(os.path.dirname(CAVA_CONFIG), exist_ok=True)
     with open(CAVA_CONFIG, "w") as f:
@@ -985,8 +1057,8 @@ sensitivity = 100
 
 [input]
 method = portaudio
-source = {_detect_mac_audio_source()}
-channels = 1
+source = {_src}
+channels = {_ch}
 
 [output]
 method = raw
@@ -1008,6 +1080,128 @@ def _wait_for_source(timeout=90):
 def wait_until_ready(source_timeout=90, settle_timeout=25):
     """Mac: PipeWire/pactl yok -> beklemeye gerek yok."""
     return True
+
+
+
+# ==================== SOUNDDEVICE OKUYUCU (cava'siz - Tahoe cozumu) ====================
+# Tahoe'da cava mono-karisim hilesi loopback'e ulasamiyor; sounddevice ile
+# Scarlett'in loopback kanallari (3-4) DOGRUDAN okunur. Stereo geri gelir.
+class SoundReader:
+    """CavaReader ile ayni arayuz: snapshot() -> 204 bar (0-255), raw_mean.
+    Kaynak: Scarlett loopback (kanal 3-4), NumPy rFFT + log-frekans binleme."""
+    RATE = 44100
+    BLOCK = 1024          # callback adimi (~43/sn - akici)
+    FFTN = 2048           # FFT penceresi (kayan tampon - cozunurluk korunur)
+
+    def __init__(self):
+        import sounddevice as sd
+        self._sd = sd
+        self.bars = [0] * NUM_BARS
+        self.raw_mean = 0.0
+        self._lock = threading.Lock()
+        self._warmup = 20
+        self._ag_peak = 0.0
+        self._ag_mult = 1.0
+        self._half = NUM_BARS // 2
+        # log-frekans bin kenarlari (40Hz - 16kHz)
+        self._freqs = np.fft.rfftfreq(self.FFTN, 1.0 / self.RATE)
+        self._ringL = np.zeros(self.FFTN, dtype=np.float32)
+        self._ringR = np.zeros(self.FFTN, dtype=np.float32)
+        # bar merkez frekanslari (log araliklarin geometrik ortasi) - interpolasyonla
+        # ornekleme: bos bin sorunu YOK (dusuk frekansta 22 bin bos kaliyordu)
+        edges = np.logspace(np.log10(40), np.log10(16000), self._half + 1)
+        self._centers = np.sqrt(edges[:-1] * edges[1:])
+        self._win = np.hanning(self.FFTN).astype(np.float32)
+        self._smooth = np.zeros(NUM_BARS, dtype=np.float32)
+        self._fall = np.zeros(NUM_BARS, dtype=np.float32)   # yercekimi hiz tamponu
+        self._dev_idx = self._find_scarlett_idx()
+        self._stream = None
+        self._start_stream()
+
+    def _find_scarlett_idx(self):
+        try:
+            for i, d in enumerate(self._sd.query_devices()):
+                if 'Scarlett' in d['name'] and d['max_input_channels'] >= 4:
+                    return i
+        except Exception:
+            pass
+        return None
+
+    def _cb(self, indata, nframes, t, status):
+        try:
+            l = indata[:, 2].astype(np.float32)
+            r = indata[:, 3].astype(np.float32)
+            # kayan tampon: yeni blogu sona ekle (overlap FFT - akici + cozunurluklu)
+            n = len(l)
+            self._ringL = np.roll(self._ringL, -n); self._ringL[-n:] = l
+            self._ringR = np.roll(self._ringR, -n); self._ringR[-n:] = r
+            bl = self._fft_bars(self._ringL)
+            br = self._fft_bars(self._ringR)
+            raw = np.concatenate([bl, br])
+            self.raw_mean = float(raw.mean())
+            # warmup
+            if self._warmup > 0:
+                self._warmup -= 1
+                if self._warmup > 12:
+                    raw = raw * 0
+                else:
+                    raw = raw * ((12 - self._warmup) / 12.0)
+            # yazilimsal auto-gain (CavaReader ile ayni desen)
+            cur_peak = float(raw.max()) if raw.size else 0.0
+            if cur_peak > self._ag_peak:
+                self._ag_peak = cur_peak
+            else:
+                self._ag_peak *= 0.995
+            if self._ag_peak > 12:
+                target = max(1.0, min(8.0, 230.0 / max(1.0, self._ag_peak)))
+            else:
+                target = 1.0
+            self._ag_mult += (target - self._ag_mult) * 0.05
+            hedef = np.clip(raw * self._ag_mult, 0, 255)
+            # MONSTERCAT yayilimi (cava'nin organik sirri): her bar komsularina
+            # 1.5 boluculu dalga yayar - spektrum "akiskan" gorunur.
+            # (monstercat yayilimi kapatildi - keskin barlar)
+            # YUKSELIS: hizli tutunma / DUSUS: yercekimi (ivmeli suzulme)
+            up = hedef >= self._smooth
+            self._smooth[up] = hedef[up] * 0.7 + self._smooth[up] * 0.3
+            self._fall[up] = 0.0
+            dn = ~up
+            self._fall[dn] += 2.2          # ivme (kare basina artan hiz)
+            self._smooth[dn] = np.maximum(hedef[dn], self._smooth[dn] - self._fall[dn])
+            with self._lock:
+                self.bars = self._smooth.astype(int).tolist()
+        except Exception:
+            pass
+
+    def _fft_bars(self, x):
+        sp = np.abs(np.fft.rfft(x * self._win))
+        # merkez frekanslarda interpolasyon (surekli spektrum, bos bar yok)
+        out = np.interp(self._centers, self._freqs, sp).astype(np.float32)
+        # dB-benzeri sikistirma + taban olcek (deneysel: muzikte ~30-120 bandi)
+        out = np.log1p(out * 8.0) * 34.0
+        return out
+
+    def _start_stream(self):
+        if self._dev_idx is None:
+            return
+        try:
+            self._stream = self._sd.InputStream(
+                device=self._dev_idx, channels=4, samplerate=self.RATE,
+                blocksize=self.BLOCK, callback=self._cb)
+            self._stream.start()
+        except Exception as e:
+            print(f"[SoundReader] akis baslatilamadi: {type(e).__name__}: {e}")
+
+    def snapshot(self):
+        with self._lock:
+            return list(self.bars)
+
+    def stop(self):
+        try:
+            if self._stream:
+                self._stream.stop(); self._stream.close()
+        except Exception:
+            pass
 
 
 class CavaReader:
@@ -1032,10 +1226,34 @@ class CavaReader:
         self._t = threading.Thread(target=self._loop, daemon=True)
         self._t.start()
 
+    def _wake_aggregate(self):
+        """Aggregate'i uyandir: sounddevice ile 1sn dinle (kanitlanmis tetik).
+        Taze/uykudaki aggregate cava'ya sifir verir; sounddevice acilisi
+        CoreAudio akisini aktive eder, ardindan cava normal okur."""
+        try:
+            srcname = _MAC_AUDIO_CACHE.get("src") or ""
+            if "ScarlettLoop" not in srcname and "Aggregate" not in srcname:
+                return
+            import sounddevice as _sdv
+            idx = None
+            for i, d in enumerate(_sdv.query_devices()):
+                if srcname in d["name"] and d["max_input_channels"] > 0:
+                    idx = i
+                    break
+            if idx is None:
+                return
+            _n = max(2, min(4, _sdv.query_devices(idx)["max_input_channels"]))
+            with _sdv.InputStream(device=idx, channels=_n, blocksize=4096):
+                time.sleep(1.0)
+            print("[ses] aggregate uyandirildi (sounddevice tetigi)")
+        except Exception as e:
+            print(f"[ses] uyandirma atlandi: {type(e).__name__}")
+
     def _start(self):
         _wait_for_source()
         self._active_source = _find_scarlett_monitor()
         write_cava_config(autosens=self._cur_autosens)
+        self._wake_aggregate()
         self.proc = subprocess.Popen([_find_cava_bin(), "-p", CAVA_CONFIG], stdout=subprocess.PIPE,
                                      stderr=subprocess.DEVNULL, text=True, bufsize=1)
         self._zero_since = None
@@ -1634,8 +1852,9 @@ def main():
     # A+B: autostart'ta sistemin oturmasini bekle (acilis yarisi atlamasini onler)
     if autostart:
         print("Autostart: sistemin oturmasi bekleniyor...")
-        wait_until_ready()
+        pass  # kaynak bekleme cava yolunda yapilir (asagida)
 
+    wait_until_ready()
     cava = CavaReader()
 
     # B+: autostart'ta cava GERCEKTEN veri uretene kadar bekle (atlama onleme)
