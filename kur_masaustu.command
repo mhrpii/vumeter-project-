@@ -49,6 +49,7 @@ done
 
 # --- 5) Uygulama dosyalari ---
 APP="/Applications/VU Meter Masaustu.app"
+PROJDIR_DESK="$(pwd)"
 echo "[*] Uygulama (.app) olusturuluyor: $APP"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/app"
@@ -80,15 +81,15 @@ cat > "$APP/Contents/Info.plist" << 'PLIST'
 PLIST
 
 # --- 7) Launcher ---
-cat > "$APP/Contents/MacOS/launcher" << 'LAUNCH'
+cat > "$APP/Contents/MacOS/launcher" << SH
 #!/bin/bash
-DIR="$(cd "$(dirname "$0")/../Resources/app" && pwd)"
-cd "$DIR" || exit 1
-pkill -f vumeter_mac_desktop 2>/dev/null
-sleep 1
-PY="$(command -v python3)"
-exec "$PY" vumeter_mac_desktop.py
-LAUNCH
+osascript <<OSA
+tell application "Terminal"
+    set w to do script "pkill -f vumeter_mac_desktop; pkill -f 'cava -p'; sleep 0.5; cd '$PROJDIR_DESK' && python3 -u vumeter_mac_desktop.py"
+    set visible of front window to false
+end tell
+OSA
+SH
 chmod +x "$APP/Contents/MacOS/launcher"
 
 # --- 8) Ikon (camgobegi tonlu - LCD'den ayirt edilsin) ---
