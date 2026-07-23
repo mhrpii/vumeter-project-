@@ -160,6 +160,20 @@ def _short_disk_name(model):
 
 
 
+
+def _kapasite_str(gb):
+    """996GB -> 1TB, 512GB, 4TB gibi yuvarlanmis kapasite etiketi."""
+    if gb >= 900:
+        tb = gb / 1000.0
+        # 0.5 adimlarla yuvarla (1TB, 2TB, 4TB)
+        t = round(tb * 2) / 2
+        return (f"{t:.1f}".rstrip("0").rstrip(".")) + "TB"
+    # GB: standart boyutlara yuvarla
+    for std in (120, 128, 240, 250, 256, 480, 500, 512, 750):
+        if abs(gb - std) < 20:
+            return f"{std}GB"
+    return f"{gb:.0f}GB"
+
 def draw_sysmon_disks(surf, disks, usage=None):
     """SAYFA 2: 9 diskin sicakliklari (ust: NVMe, alt: SATA)."""
     surf.fill((8, 10, 8))
@@ -204,13 +218,21 @@ def draw_sysmon_disks(surf, disks, usage=None):
             # sicaklik rakami
             vf = _font(int(gr * 0.9))
             vs = vf.render(f"{temp}", True, gcol)
-            surf.blit(vs, (gcx - vs.get_width()//2, gcy - vs.get_height()//2))
-            # C birimi
-            uf = _font(max(9, int(14 * SCALE)))
-            us = uf.render("C", True, (170, 182, 196))
-            surf.blit(us, (ccx - us.get_width()//2, row_top + int(row_h*0.66)))
+            vx = gcx - vs.get_width()//2
+            vy = gcy - vs.get_height()//2
+            surf.blit(vs, (vx, vy))
+            # C birimi: rakamin SAG USTUNE (derece isareti gibi - LCD ile ayni)
+            uf = _font(max(10, int(gr * 0.32)))
+            us = uf.render("°C", True, (170, 182, 196))
+            surf.blit(us, (vx + vs.get_width() + 2, vy - 2))
             # disk adi - kisa ve okunakli isim
+            _u = usage.get(model)
+            pct = (_u[0] if isinstance(_u, tuple) else (_u or 0.0))
+            _gb = (_u[1] if isinstance(_u, tuple) and len(_u) > 1 else None)
             name = _short_disk_name(model)
+            # isimde kapasite yoksa gercek veriden ekle (tutarlilik)
+            if _gb and not any(x in name for x in ("GB", "TB", "G ")):
+                name = f"{name} {_kapasite_str(_gb)}"
             # karta sigacak en buyuk fontu bul (18'den asagi)
             nsize = 24
             nf = _font(nsize)
@@ -220,7 +242,7 @@ def draw_sysmon_disks(surf, disks, usage=None):
             ns = nf.render(name, True, (225, 232, 242))
             surf.blit(ns, (ccx - ns.get_width()//2, row_top + int(row_h*0.80)))
             # DIKEY DOLULUK BARI (sol ic kenar) - fiziksel disk tamami
-            pct = usage.get(model, 0.0)
+
             bw = max(5, int(card_w * 0.055))
             bx = cx0 + 6
             bt = row_top + int(row_h * 0.10)

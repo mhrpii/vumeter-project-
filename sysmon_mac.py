@@ -265,7 +265,9 @@ def disk_usage_map():
                     parts += sanal_parts.get(sanal, [])
             used, bagli = kullanim(parts)
             if f["size"] > 0 and bagli:
-                yeni[f["model"]] = 100.0 * used / f["size"]
+                yeni[f["model"]] = (100.0 * used / f["size"], f["size"] / 1e9)
+            elif f["size"] > 0:
+                yeni[f["model"]] = (0.0, f["size"] / 1e9)   # bagli degil: %0 + kapasite
         _du_cache["map"] = yeni
     except Exception:
         pass
