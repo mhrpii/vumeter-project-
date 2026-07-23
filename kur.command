@@ -74,25 +74,11 @@ else
 fi
 command -v brew >/dev/null 2>&1 && { brew list libusb >/dev/null 2>&1 || brew install libusb 2>/dev/null; }
 
-# --- 3) BlackHole kontrolu (ses yakalama icin) ---
+# --- 3) Ses yolu notu ---
 echo ""
-echo "[*] Ses yakalama (BlackHole) kontrol ediliyor..."
-if system_profiler SPAudioDataType 2>/dev/null | grep -qi "BlackHole"; then
-    echo "[OK] BlackHole kurulu."
-else
-    echo "[i] BlackHole kurulu degil - SORUN DEGIL: Scarlett gibi loopback'li
-    ses karti varsa gerek YOK (otomatik aggregate ile calisir).
-    Loopback'siz aygitlar (dahili hoparlor vb.) icin alternatif:"
-    echo "    macOS, hoparlorden calan sesi dogrudan yakalatmaz; BlackHole (sanal"
-    echo "    ses aygiti) gerekir."
-    echo "    1) Indir: https://existential.audio/blackhole/ (2ch) — .pkg installer"
-    echo "       ya da https://github.com/ExistentialAudio/BlackHole/releases"
-    echo "    2) Kur (.pkg cift tikla)."
-    echo "    3) Audio MIDI Setup -> + -> Create Multi-Output Device"
-    echo "       -> Built-in Output + BlackHole 2ch isaretle"
-    echo "    4) Sistem ses cikisini 'Multi-Output Device' yap."
-    echo "    (Detay: README 'Ses kurulumu' bolumu)"
-fi
+echo "[i] Ses: loopback ozellikli ses karti (ornek: Scarlett) varsa"
+echo "    ek yazilim gerekmez - sistem cikisini o karta alin."
+echo "    Loopback yoksa BlackHole gibi sanal aygit gerekir (README)."
 
 # --- 4) Python kutuphaneleri ---
 echo ""
