@@ -66,7 +66,8 @@ LED_THEME_NAMES = list(LED_THEMES.keys())
 # Durum (calisma sirasinda klavye ile degisir)
 state = {
     "mode": "Spektrum",        # "Spektrum" | "Klasik VU" | "LED Spektrum"
-    "theme_idx": 0,            # COLOR_THEME_NAMES index'i
+    "theme_idx": 0,            # COLOR_THEME_NAMES index'i (Spektrum)
+    "theme2_idx": 0,           # COLOR_THEME_NAMES index'i (Spektrum 2 - ayri)
     "led_theme_idx": 0,        # LED_THEME_NAMES index'i
     "vu_dial_idx": 0,          # VU_DIALS index'i (TAB ile VU Metre modunda)
     "ch_layout": 1,            # C tusu: kanal dizilimi (0:L+R, 1:L+R', 2:L'+R, 3:L'+R')
@@ -78,7 +79,7 @@ state = {
 
 # ==================== AYAR KAYDETME (kalici - masaustu) ====================
 DESKTOP_SETTINGS_PATH = os.path.expanduser("~/.config/vumeter/desktop_settings.json")
-_DESKTOP_KEYS = ["mode", "theme_idx", "led_theme_idx", "vu_dial_idx",
+_DESKTOP_KEYS = ["mode", "theme_idx", "theme2_idx", "led_theme_idx", "vu_dial_idx",
                  "ch_layout", "sens_mult"]
 
 def load_desktop_settings():
@@ -1151,11 +1152,12 @@ def setup_tray():
             return _f
 
         # Spektrum / Spektrum 2 -> renk temalari (renk onizleme ikonlu)
-        for mname, mkey in (("Spektrum", "Spektrum"), ("Spektrum 2 (Bar)", "Spektrum 2")):
+        for mname, mkey, tkey in (("Spektrum", "Spektrum", "theme_idx"),
+                                  ("Spektrum 2 (Bar)", "Spektrum 2", "theme2_idx")):
             sub = menu.addMenu(mname)
             for i, tn in enumerate(COLOR_THEME_NAMES):
                 a = QAction(theme_icon(COLOR_THEMES[tn]), tn, menu)
-                a.triggered.connect(set_state(mode=mkey, theme_idx=i))
+                a.triggered.connect(set_state(mode=mkey, **{tkey: i}))
                 sub.addAction(a)
 
         # LED modlari -> LED temalari (renk onizleme ikonlu)
@@ -1379,6 +1381,8 @@ while running:
                 elif state["mode"] == "VU Metre":
                     state["vu_dial_idx"] = (state["vu_dial_idx"] + 1) % len(VU_DIALS)
                     _vu_scaled_cache.clear()
+                elif state["mode"] == "Spektrum 2":
+                    state["theme2_idx"] = (state["theme2_idx"] + 1) % len(COLOR_THEME_NAMES)
                 else:
                     state["theme_idx"] = (state["theme_idx"] + 1) % len(COLOR_THEME_NAMES)
             if event.type == pygame.KEYDOWN:
@@ -1414,7 +1418,7 @@ while running:
         draw_meter_panel(W_CURRENT, H_CURRENT, cava_bars)
     elif mode == "Spektrum 2":
         screen.fill((15, 15, 15))
-        draw_spectrum_bars(W_CURRENT, H_CURRENT, stereo_bars, COLOR_THEME_NAMES[state["theme_idx"]])
+        draw_spectrum_bars(W_CURRENT, H_CURRENT, stereo_bars, COLOR_THEME_NAMES[state["theme2_idx"]])
     else:  # Spektrum
         screen.fill((15, 15, 15))
         draw_spectrum(W_CURRENT, H_CURRENT, stereo_bars, COLOR_THEME_NAMES[state["theme_idx"]], cava_bars)
